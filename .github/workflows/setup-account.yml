@@ -15,10 +15,7 @@ jobs:
 
   provision-account:
     uses: dat515-2026/tests/.github/workflows/provision-student-account.yml@main
-    secrets:
-      OPENSTACK_PROJECT_ID: ${{ secrets.OPENSTACK_PROJECT_ID }}
-      OPENSTACK_USERNAME: ${{ secrets.OPENSTACK_USERNAME }}
-      OPENSTACK_PASSWORD: ${{ secrets.OPENSTACK_PASSWORD }}
+    secrets: inherit
     with:
       # Pass your UiS email ID "email@uis.no"
       student_email: ""
