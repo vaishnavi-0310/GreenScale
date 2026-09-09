@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ] # Run this workflow on pushes to the main branch
     paths:
-      - '4docker/app/**' # Trigger when files in this directory change
+      - '4docker/app/**' # Change this from 4 to 9, if you are going with 9docker
 
 jobs:
   build-and-push:
@@ -28,7 +28,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
-          context: ./4docker/app # Path to the Dockerfile and source code
+          context: ./4docker/app # Change this from 4 to 9, if you are going with 9docker
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
