@@ -4,7 +4,8 @@ on:
   push:
     branches: [ "main" ] # Run this workflow on pushes to the main branch
     paths:
-      - '4docker/app/**' # Change this from 4 to 9, if you are going with 9docker
+      - '4docker/5-multi-arch/task1/**'
+      - '9docker/app/**'
 
 jobs:
   build-and-push:
@@ -12,6 +13,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      # Determine which folder triggered this run, since the two tasks use different Dockerfiles
+      - name: Detect changed app
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker4: '4docker/5-multi-arch/task1/**'
+            docker9: '9docker/app/**'
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -25,12 +35,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push (4docker)
+        if: steps.filter.outputs.docker4 == 'true'
         uses: docker/build-push-action@v7
         with:
-          context: ./4docker/app # Change this from 4 to 9, if you are going with 9docker
+          context: ./4docker/5-multi-arch/task1
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             APP_VERSION=${{ github.sha }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/dat515-app:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/dat515-4docker-app:latest
+
+      - name: Build and push (9docker)
+        if: steps.filter.outputs.docker9 == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./9docker/app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/dat515-9docker-app:latest
