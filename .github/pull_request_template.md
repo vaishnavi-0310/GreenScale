@@ -1,7 +1,7 @@
-# 💀 Pull Requests Are NOT Accepted ⚠️
+# Pull requests must not be submitted to the assignment repository. ⚠️
 
-This repository does not accept pull requests.
+You may open pull requests on your own fork of the assignment repository, but you must not submit pull requests to the assignment repository itself.
 
-If you discover a mistake or wish to suggest changes, please use the Issues tab or contact the course staff directly.
+If you discover a mistake or wish to suggest changes, please use the Issues tab on the assignment repository or contact the course staff directly.
 
-Opening a pull request with a (partial) solution may result in **dismissal from the course.** ☠️☠️☠️
+You may delete the template file `.github/pull_request_template.md` in your fork to remove this warning message.
