@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    container_name: greenscale-db
+    environment:
+      POSTGRES_USER: greenscale
+      POSTGRES_PASSWORD: greenscale
+      POSTGRES_DB: greenscale
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U greenscale"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer
+    container_name: greenscale-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+  app:
+    build: .
+    container_name: greenscale-app
+    environment:
+      DATABASE_URL: postgresql+psycopg://greenscale:greenscale@db:5432/greenscale
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
