@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://greenscale:greenscale@localhost:5432/greenscale"
     )
+    gemini_api_key: str = "REMOVED_GEMINI_API_KEY"
+    gemini_model: str = "gemini-3.8-flash"
 
 
 settings = Settings()

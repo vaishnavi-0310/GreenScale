@@ -3,8 +3,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.llm import LLMError, LLMUnavailableError, extract_job
 from app.models import Job, JobStatus
-from app.schemas import JobCreate, JobRead
+from app.schemas import JobCreate, JobRead, TextJobRequest
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -17,6 +18,36 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     db.refresh(job)
     return job
 
+def get_extractor():
+    """Dependency so tests can swap in a fake LLM."""
+    return extract_job
+
+
+@router.post("/from-text", response_model=JobRead, status_code=status.HTTP_201_CREATED)
+def create_job_from_text(
+    payload: TextJobRequest,
+    db: Session = Depends(get_db),
+    extractor=Depends(get_extractor),
+):
+    try:
+        job_data = extractor(payload.text)
+    except LLMUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="The LLM service is temporarily unavailable. Please retry shortly.",
+            headers={"Retry-After": "30"},
+        )
+    except LLMError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not turn the description into a valid job: {e}",
+        )
+
+    job = Job(**job_data.model_dump())
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
 
 @router.get("", response_model=list[JobRead])
 def list_jobs(
