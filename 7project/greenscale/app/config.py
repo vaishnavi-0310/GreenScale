@@ -7,7 +7,9 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://greenscale:greenscale@localhost:5432/greenscale"
     )
-    gemini_api_key: str = "REMOVED_GEMINI_API_KEY"
+    # Empty by default: set GEMINI_API_KEY in your local .env (never commit it).
+    # When empty, LLM features fall back to deterministic defaults.
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
 
 

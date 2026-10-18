@@ -46,3 +46,41 @@ python -c "from app.prices import fetch_day; from datetime import date; print(fe
 
 These are public spot prices, not GCP's actual electricity cost. Describe results as
 "modelled exposure to the NO2 price signal", not as money saved on Google infrastructure.
+
+## Runtime predictor (`app/predictor.py`)
+
+`predict_runtime(workload_type, input_size_mb) -> (seconds, source)` asks Gemini
+for a rough runtime estimate from job metadata only. The LLM never receives API
+keys, job descriptions or customer data, and it never chooses the schedule; the
+deterministic scheduler does that using the returned seconds.
+
+Every call returns a usable number. `source` tells you where it came from:
+
+| `source`             | Meaning                                                              |
+|----------------------|----------------------------------------------------------------------|
+| `llm`                | Gemini returned an integer within 1..14400 seconds                   |
+| `fallback_no_key`    | `GEMINI_API_KEY` is not set; conservative default used               |
+| `fallback_llm_error` | Request failed (quota, timeout, bad JSON, out-of-range); default used |
+
+Fallback defaults: `sleep` 60 s, `factorial` 90 s, `csv_summary` 120 s.
+Failures are logged by exception type only, never with the prompt, response or key.
+
+Configuration (local `.env`, never committed):
+
+```
+GEMINI_API_KEY=your_key_from_aistudio.google.com
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+Live check (prints one row per workload type):
+
+```bash
+python scripts/try_llm.py
+```
+
+Without a key every row shows `fallback_no_key`. Unit tests in
+`tests/test_predictor.py` use a fake client and need no key or network.
+
+LLM estimates are uncertain guesses from metadata. Record predicted vs. actual
+runtime once jobs really execute, and do not claim forecast accuracy without
+that comparison.
