@@ -83,3 +83,14 @@ def fetch_day(
 
     response.raise_for_status()
     return parse_rows(response.json())
+
+
+def recommend_for_price(slot: PriceSlot, client=None):
+    """Return an LLM run/defer recommendation for one fetched price interval.
+
+    The API data remains the source of truth; this recommendation is advisory
+    and does not schedule or start a job.
+    """
+    from app.llm import decide_price
+
+    return decide_price(slot.nok_per_kwh, client=client)
