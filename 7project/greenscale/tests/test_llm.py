@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import requests
 
 import pytest
@@ -8,11 +8,11 @@ from app import llm
 from app.llm import LLMError, LLMUnavailableError, extract_job
 from app.models import Priority
 
-NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 
 GOOD = (
     '{"name": "Compress logs", "priority": "low", '
-    '"estimated_minutes": 20, "deadline": "2026-10-15T06:00:00Z"}'
+    f'"estimated_minutes": 20, "deadline": "{(NOW + timedelta(days=1)).isoformat()}"}}'
 )
 
 
