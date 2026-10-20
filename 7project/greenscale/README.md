@@ -2,27 +2,64 @@
 
 Flexible Kubernetes batch-job scheduler that plans jobs around Norwegian (NO2) electricity spot prices.
 
-Run everything from this directory (`7project/greenscale`).
+## Installation
+
+Run everything from this directory (`7project/greenscale`). Create a virtual
+environment so packages like `pydantic_settings` and `uvicorn` are not taken
+from the system Python. Activate it in **every new terminal**; the prompt
+should show `(.venv)`. If you skip activation, `python` may be missing and
+`python3` may raise `ModuleNotFoundError` for project packages.
+
+### macOS / Linux (bash or zsh)
+
+macOS often has `python3` but not `python`. After activation, `python` points
+at the venv.
+
+```bash
+cd 7project/greenscale
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env               # then edit secrets locally; .env is git-ignored
+```
+
+### Windows (PowerShell)
+
+Use `py` (Python launcher) if `python` is not on PATH. If activation is
+blocked, run commands with `.venv\Scripts\python.exe` instead of changing
+the system execution policy.
+
+```powershell
+cd 7project\greenscale
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env        # then edit secrets locally; .env is git-ignored
+```
 
 ## Quick start
 
+With the venv activated and Docker Desktop running:
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env               # then edit secrets locally; .env is git-ignored
 docker compose up -d db
 python -m uvicorn app.main:app --reload
 ```
+
+Windows PowerShell is the same after `Activate.ps1`.
 
 - Health: http://127.0.0.1:8000/health
 - Docs: http://127.0.0.1:8000/docs
 
 ## Tests
 
+With the venv activated:
+
 ```bash
 pytest
 ```
+
+Windows: `.\.venv\Scripts\Activate.ps1` then `pytest`.
 
 ## Price adapter (`app/prices.py`)
 
@@ -38,9 +75,15 @@ and returns a list of `PriceSlot(start, end, nok_per_kwh)` sorted by start time.
   keep the job pending rather than invent prices.
 - Unit tests use `httpx.MockTransport` and `fixtures/sample_prices.json`; no network needed.
 
-Live check against today's NO2 prices:
+Live check against today's NO2 prices (venv activated):
 
 ```bash
+python -c "from app.prices import fetch_day; from datetime import date; print(fetch_day(date.today())[:2])"
+```
+
+Windows PowerShell:
+
+```powershell
 python -c "from app.prices import fetch_day; from datetime import date; print(fetch_day(date.today())[:2])"
 ```
 
@@ -74,7 +117,17 @@ GEMINI_MODEL=gemini-3.8-flash
 
 Live check (prints one row per workload type):
 
+macOS / Linux:
+
 ```bash
+source .venv/bin/activate
+python scripts/try_llm.py
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 python scripts/try_llm.py
 ```
 
