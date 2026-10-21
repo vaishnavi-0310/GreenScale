@@ -104,3 +104,83 @@ def plan_pending_job(
         raise
 
     return job
+
+
+def main():
+    import argparse
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    import httpx
+
+    from app.db import SessionLocal
+    from app.prices import fetch_day
+
+    # 1. Read inputs from the terminal
+    parser = argparse.ArgumentParser(
+        description="Plan a pending GreenScale job"
+    )
+
+    parser.add_argument("job_id", type=int)
+
+    parser.add_argument(
+        "--workload-type",
+        required=True,
+        choices=["sleep", "factorial", "csv_summary"],
+    )
+
+    parser.add_argument(
+        "--input-size-mb",
+        required=True,
+        type=int,
+    )
+
+    args = parser.parse_args()
+
+    if args.input_size_mb < 1:
+        parser.error("--input-size-mb must be positive")
+
+    # 2. Find today's date in Norway
+    now = datetime.now(timezone.utc)
+    oslo_today = now.astimezone(
+        ZoneInfo("Europe/Oslo")
+    ).date()
+
+    # 3. Download today's and tomorrow's prices
+    prices = []
+
+    for day in (
+        oslo_today,
+        oslo_today + timedelta(days=1),
+    ):
+        try:
+            prices.extend(fetch_day(day, area="NO2"))
+            print(f"Loaded electricity prices for {day}")
+
+        except httpx.HTTPError as error:
+            print(
+                f"Prices unavailable for {day}: "
+                f"{type(error).__name__}"
+            )
+
+    # 4. Open PostgreSQL and plan the requested job
+    with SessionLocal() as db:
+        job = plan_pending_job(
+            db=db,
+            job_id=args.job_id,
+            prices=prices,
+            now=now,
+            workload_type=args.workload_type,
+            input_size_mb=args.input_size_mb,
+        )
+
+        # 5. Display the saved result
+        print("Job ID:", job.id)
+        print("Status:", job.status.value)
+        print("Estimated minutes:", job.estimated_minutes)
+        print("Scheduled for:", job.scheduled_for)
+        print("Reason:", job.decision_reason)
+
+
+if __name__ == "__main__":
+    main()
