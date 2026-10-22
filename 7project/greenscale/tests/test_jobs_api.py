@@ -93,3 +93,46 @@ def test_rejects_bad_duration(client, minutes):
 def test_rejects_invalid_priority(client):
     r = client.post("/jobs", json=make_payload(priority="urgent"))
     assert r.status_code == 422
+
+def test_create_and_retrieve_workload_metadata(client):
+    # Step 1: Prepare a job with workload metadata
+    payload = make_payload(
+        name="CSV Processing Test",
+        workload_type="csv_summary",
+        input_size_mb=10,
+    )
+
+    # Step 2: Create the job through FastAPI
+    response = client.post("/jobs", json=payload)
+
+    assert response.status_code == 201
+
+    created_job = response.json()
+
+    # Step 3: Verify the API creation response
+    assert created_job["workload_type"] == "csv_summary"
+    assert created_job["input_size_mb"] == 10
+
+    # Step 4: Retrieve the job using its ID
+    job_id = created_job["id"]
+
+    get_response = client.get(f"/jobs/{job_id}")
+
+    assert get_response.status_code == 200
+
+    stored_job = get_response.json()
+
+    # Step 5: Verify the saved metadata
+    assert stored_job["workload_type"] == "csv_summary"
+    assert stored_job["input_size_mb"] == 10
+
+# invalid metadata API test
+def test_api_rejects_invalid_workload_metadata(client):
+    payload = make_payload(
+        workload_type="video_editing",
+        input_size_mb=10,
+    )
+
+    response = client.post("/jobs", json=payload)
+
+    assert response.status_code == 422

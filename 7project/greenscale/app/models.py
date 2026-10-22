@@ -33,6 +33,13 @@ class Job(Base):
     # What the user asked for
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, default=None)  # original text (used in Step 5)
+    workload_type: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+
+    input_size_mb: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     priority: Mapped[Priority] = mapped_column(
         Enum(Priority, native_enum=False, length=20), default=Priority.MEDIUM
     )

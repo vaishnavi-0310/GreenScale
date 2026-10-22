@@ -8,6 +8,15 @@ from app.models import JobStatus, Priority
 class JobCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    workload_type: str | None = Field(
+        default=None,
+        pattern=r"^(sleep|factorial|csv_summary)$"
+    )
+
+    input_size_mb: int | None = Field(
+        default=None,
+        gt=0
+    )
     priority: Priority = Priority.MEDIUM
     deadline: datetime
     estimated_minutes: int = Field(gt=0, le=1440)  # 1 minute to 24 hours
@@ -39,6 +48,8 @@ class JobRead(BaseModel):
     id: int
     name: str
     description: str | None
+    workload_type: str | None
+    input_size_mb: int | None
     priority: Priority
     deadline: datetime
     estimated_minutes: int
