@@ -29,6 +29,8 @@ services:
     container_name: greenscale-app
     environment:
       DATABASE_URL: postgresql+psycopg://greenscale:greenscale@db:5432/greenscale
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
     ports:
       - "8000:8000"
     depends_on:
