@@ -22,11 +22,25 @@ spec:
 
       containers:
         - name: greenscale-api
-          image: vachi1522/greenscale-api:dev
+          image: vachi1522/greenscale-api:vertex-v1
           imagePullPolicy: Always
 
           ports:
             - containerPort: 8000
+            
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
 
           env:
             - name: DATABASE_URL
