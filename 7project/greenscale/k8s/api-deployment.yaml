@@ -18,6 +18,8 @@ spec:
         app: greenscale-api
 
     spec:
+      serviceAccountName: greenscale-api
+
       containers:
         - name: greenscale-api
           image: vachi1522/greenscale-api:dev
