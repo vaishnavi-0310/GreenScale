@@ -71,7 +71,7 @@ def predict_runtime(
     except KeyError:
         raise ValueError(f"Unknown workload_type: {workload_type!r}") from None
 
-    if client is None and not settings.gemini_api_key:
+    if client is None and not settings.use_vertex_ai and not settings.gemini_api_key:
         return default, SOURCE_NO_KEY
 
     try:
