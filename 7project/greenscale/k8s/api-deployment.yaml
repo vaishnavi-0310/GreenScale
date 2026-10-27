@@ -34,3 +34,13 @@ spec:
                 secretKeyRef:
                   name: greenscale-db-secret
                   key: database-url
+
+            # Gemini through Google Cloud Vertex AI
+            - name: USE_VERTEX_AI
+              value: "true"
+
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "greenscale-group24-512813"
+
+            - name: GOOGLE_CLOUD_LOCATION
+              value: "global"
