@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # When empty, LLM features fall back to deterministic defaults.
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    log_level: str = "INFO"
 
     # Google Cloud Vertex AI configuration
     use_vertex_ai: bool = False
@@ -18,4 +19,4 @@ class Settings(BaseSettings):
     google_cloud_location: str = "global"
 
 
-settings = Settings()
+settings = Settings(log_level="INFO")
