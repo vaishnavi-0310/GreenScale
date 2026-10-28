@@ -7,6 +7,10 @@ from app.llm import LLMError, LLMUnavailableError, extract_job
 from app.models import Job, JobStatus
 from app.schemas import JobCreate, JobRead, TextJobRequest
 
+import logging
+
+logger = logging.getLogger("greenscale")
+
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
@@ -16,6 +20,10 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     db.add(job)
     db.commit()
     db.refresh(job)
+    logger.info(
+        "job created",
+        extra={"event": "job_created", "job_id": job.id, "status": job.status.value},
+    )
     return job
 
 def get_extractor():
@@ -32,12 +40,16 @@ def create_job_from_text(
     try:
         job_data = extractor(payload.text)
     except LLMUnavailableError:
+        logger.warning("llm unavailable", extra={"event": "llm_unavailable"})   # in the 503 block
+        logger.warning("llm output rejected", extra={"event": "llm_rejected"})  # in the 502 block
         raise HTTPException(
             status_code=503,
             detail="The LLM service is temporarily unavailable. Please retry shortly.",
             headers={"Retry-After": "30"},
         )
     except LLMError as e:
+        logger.warning("llm unavailable", extra={"event": "llm_unavailable"})   # in the 503 block
+        logger.warning("llm output rejected", extra={"event": "llm_rejected"})  # in the 502 block
         raise HTTPException(
             status_code=502,
             detail=f"Could not turn the description into a valid job: {e}",
@@ -47,6 +59,10 @@ def create_job_from_text(
     db.add(job)
     db.commit()
     db.refresh(job)
+    logger.info(
+        "job created",
+        extra={"event": "job_created", "job_id": job.id, "status": job.status.value},
+    )
     return job
 
 @router.get("", response_model=list[JobRead])
