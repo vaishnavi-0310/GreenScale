@@ -655,3 +655,163 @@ The following have been verified:
 The complete automatic scheduler-to-Kubernetes-Job execution workflow requires separate integration verification.
 
 Deployment, rollback, cleanup, and security-review procedures will be expanded during the remaining Member C Phase 4 work.
+
+## 10. Deployment Rollback and Recovery
+
+Kubernetes maintains revision history for the GreenScale FastAPI Deployment. This allows the team to restore a previous Deployment configuration if an update fails.
+
+### A. Check deployment history
+
+```bash
+kubectl rollout history deployment/greenscale-api -n greenscale
+```
+
+The deployment had three revisions during Phase 3 verification.
+
+### B. Inspect the current deployment
+
+```bash
+kubectl get deployment greenscale-api -n greenscale
+
+kubectl get pods -n greenscale
+```
+
+Check the currently configured Docker image:
+
+```bash
+kubectl get deployment greenscale-api -n greenscale \
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+```
+
+### C. Roll back if necessary
+
+If a new deployment fails, an authorized team member can run:
+
+```bash
+kubectl rollout undo deployment/greenscale-api -n greenscale
+```
+
+This restores the previous Deployment revision.
+
+To restore a specific available revision:
+
+```bash
+kubectl rollout undo deployment/greenscale-api \
+  -n greenscale --to-revision=2
+```
+
+**Warning:** These commands modify the running application. Execute them only when a rollback is necessary.
+
+### D. Verify recovery
+
+```bash
+kubectl rollout status deployment/greenscale-api \
+  -n greenscale --timeout=180s
+
+kubectl get pods -n greenscale
+```
+
+Inspect logs if the application remains unhealthy:
+
+```bash
+kubectl logs deployment/greenscale-api -n greenscale --tail=50
+```
+
+### E. Important limitations
+
+- Kubernetes rollback restores Deployment configuration, not database contents.
+- It does not reverse PostgreSQL schema changes.
+- A previous image must still be available in the container registry.
+- The restored configuration must remain compatible with the current database and external services.
+- Deployment revision history is limited by Kubernetes retention settings.
+- After a rollback, update the repository to reflect the intended deployed configuration and document the reason.
+
+The rollback commands have been documented but have not been executed against the working GreenScale deployment during this phase.
+
+## 11. Kubernetes Cleanup
+
+This section documents how to remove GreenScale resources after the project is finished.
+
+**Warning:** Cleanup commands are destructive. Do not run them on the working GKE environment during normal development or demonstrations.
+
+### A. Inspect resources before cleanup
+
+```bash
+kubectl config current-context
+kubectl get deployments,pods,services,pvc -n greenscale
+```
+
+Confirm that the correct cluster and namespace are selected.
+
+### B. Remove the FastAPI application
+
+```bash
+kubectl delete deployment greenscale-api -n greenscale
+kubectl delete service greenscale-api-service -n greenscale
+```
+
+These commands remove the FastAPI Deployment and its Service.
+
+They do not directly delete PostgreSQL or its persistent volume.
+
+### C. Remove PostgreSQL compute resources
+
+Only after confirming that the database is no longer required:
+
+```bash
+kubectl delete deployment greenscale-postgres -n greenscale
+kubectl delete service greenscale-postgres -n greenscale
+```
+
+These commands stop PostgreSQL and remove its Service. The PersistentVolumeClaim remains unless deleted separately.
+
+### D. Persistent storage cleanup
+
+The PostgreSQL data is stored using:
+
+`greenscale-postgres-pvc`
+
+Deleting the PVC may also delete the underlying persistent disk, depending on the StorageClass reclaim policy.
+
+**Do not delete the PVC unless data loss is acceptable and the team has confirmed that any required backup exists.**
+
+For complete teardown only:
+
+```bash
+kubectl delete pvc greenscale-postgres-pvc -n greenscale
+```
+
+### E. Other resources
+
+Review remaining Kubernetes resources:
+
+```bash
+kubectl get all -n greenscale
+kubectl get pvc,secrets,serviceaccounts,roles,rolebindings -n greenscale
+```
+
+A complete teardown must also account for Kubernetes Jobs, executor RBAC, Secrets, ServiceAccounts, cluster-level resources where applicable, and Google Cloud IAM bindings created for GreenScale.
+
+Do not remove shared cluster resources or IAM bindings without confirming ownership.
+
+### F. Verify cleanup
+
+```bash
+kubectl get deployments,pods,services,pvc -n greenscale
+```
+
+Confirm that only the intended resources have been removed.
+
+### G. Google Cloud cost considerations
+
+Kubernetes resource cleanup and GKE cluster deletion are separate operations.
+
+Deleting application Pods does not necessarily stop GKE cluster charges. Persistent disks, cluster infrastructure, networking resources, and other Google Cloud resources may continue generating costs.
+
+After the project, review the GCP Billing console and remove resources that are no longer needed, following the team's agreed cleanup plan.
+
+### H. Cleanup status
+
+These commands are documented for reproducibility.
+
+They have **not been executed against the working GreenScale environment**, because the project is still under development.
