@@ -1,10 +1,18 @@
+import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from app import models  # noqa: F401
+from app.config import settings
 from app.db import Base, engine
-from app.routes import router as jobs_router          # NEW
+from app.health import router as health_router
+from app.logging_config import setup_logging
+from app.routes import router as jobs_router
+
+setup_logging(settings.log_level)
+logger = logging.getLogger("greenscale")
 
 
 @asynccontextmanager
@@ -20,9 +28,40 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(jobs_router)                        # NEW
+QUIET_PATHS = {"/health", "/ready"}  # probes fire every few seconds
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.error(
+            "request failed",
+            extra={
+                "event": "http_error",
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": 500,
+                "error": type(exc).__name__,
+            },
+        )
+        raise
+    level = logging.DEBUG if request.url.path in QUIET_PATHS else logging.INFO
+    logger.log(
+        level,
+        "request",
+        extra={
+            "event": "http_request",
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+        },
+    )
+    return response
+
+
+app.include_router(jobs_router)
+app.include_router(health_router)

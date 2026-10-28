@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY execution ./execution
 
 # Run as a non-root user (good practice, and Kubernetes-friendly later)
 RUN useradd --create-home appuser
