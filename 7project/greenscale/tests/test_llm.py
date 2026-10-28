@@ -9,10 +9,11 @@ from app.llm import LLMError, LLMUnavailableError, extract_job
 from app.models import Priority
 
 NOW = datetime.now(timezone.utc)
+DEADLINE = (NOW + timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 GOOD = (
     '{"name": "Compress logs", "priority": "low", '
-    f'"estimated_minutes": 20, "deadline": "{(NOW + timedelta(days=1)).isoformat()}"}}'
+    '"estimated_minutes": 20, "deadline": "%s"}' % DEADLINE
 )
 
 
