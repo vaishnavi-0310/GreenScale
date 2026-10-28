@@ -30,6 +30,12 @@ jobs:
       - name: Run tests (offline, no database, LLM, GKE or price API)
         run: python -m pytest -q
 
+      - name: Syntax check (compileall)
+        run: python -m compileall -q app tests scripts
+
+      - name: Validate Kubernetes manifests (offline)
+        run: python scripts/check_manifests.py
+
   docker-build:
     runs-on: ubuntu-24.04
     needs: test
