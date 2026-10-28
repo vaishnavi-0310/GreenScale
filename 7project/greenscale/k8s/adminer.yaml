@@ -1,0 +1,44 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greenscale-adminer
+  namespace: greenscale
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: greenscale-adminer
+
+  template:
+    metadata:
+      labels:
+        app: greenscale-adminer
+
+    spec:
+      containers:
+        - name: adminer
+          image: adminer:5
+          ports:
+            - containerPort: 8080
+
+          env:
+            - name: ADMINER_DEFAULT_SERVER
+              value: greenscale-postgres
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: greenscale-adminer
+  namespace: greenscale
+
+spec:
+  type: ClusterIP
+  selector:
+    app: greenscale-adminer
+
+  ports:
+    - port: 8080
+      targetPort: 8080
