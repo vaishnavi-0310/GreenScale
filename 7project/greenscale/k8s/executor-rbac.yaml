@@ -23,6 +23,9 @@ subjects:
   - kind: ServiceAccount
     name: greenscale-executor
     namespace: greenscale
+  - kind: ServiceAccount
+    name: greenscale-api
+    namespace: greenscale
 roleRef:
   kind: Role
   name: greenscale-executor
