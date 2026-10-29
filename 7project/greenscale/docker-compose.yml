@@ -29,8 +29,14 @@ services:
     container_name: greenscale-app
     environment:
       DATABASE_URL: postgresql+psycopg://greenscale:greenscale@db:5432/greenscale
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      USE_VERTEX_AI: ${USE_VERTEX_AI:-false}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-global}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/google/adc.json
+    volumes:
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/var/run/google/adc.json:ro
     ports:
       - "8000:8000"
     depends_on:
