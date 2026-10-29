@@ -22,7 +22,7 @@ spec:
 
       containers:
         - name: greenscale-api
-          image: vachi1522/greenscale-api:vertex-v1
+          image: vachi1522/greenscale-api:workload-executor-v1
           imagePullPolicy: Always
 
           ports:

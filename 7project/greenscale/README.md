@@ -42,7 +42,7 @@ Copy-Item .env.example .env        # then edit secrets locally; .env is git-igno
 With the venv activated and Docker Desktop running:
 
 ```bash
-docker compose up -d db
+docker compose up -d --build app
 python -m uvicorn app.main:app --reload
 ```
 
@@ -71,7 +71,7 @@ and returns a list of `PriceSlot(start, end, nok_per_kwh)` sorted by start time.
   fields; the adapter never assumes "array index == hour".
 - All timestamps are timezone-aware. Naive timestamps or `end <= start` raise `ValueError`.
 - Tomorrow's file is published no earlier than ~13:00 local time, so an HTTP 404
-  for tomorrow is normal and is raised as `httpx.HTTPStatusError`. Callers should
+for tomorrow is normal and is raised as `httpx.HTTPStatusError`. Callers should
   keep the job pending rather than invent prices.
 - Unit tests use `httpx.MockTransport` and `fixtures/sample_prices.json`; no network needed.
 
@@ -137,3 +137,36 @@ Without a key every row shows `fallback_no_key`. Unit tests in
 LLM estimates are uncertain guesses from metadata. Record predicted vs. actual
 runtime once jobs really execute, and do not claim forecast accuracy without
 that comparison.
+
+## Kubernetes workload execution
+
+The dispatcher CronJob checks every minute for jobs whose status is `waiting` and
+whose scheduled start has arrived. It creates a Kubernetes Job and checks running
+Kubernetes Jobs on subsequent passes so GreenScale records `succeeded` or `failed`.
+
+Supported worker commands are allowlisted in `execution/worker.py`:
+
+- `sleep`: sleeps for the job's planned runtime (`estimated_minutes`).
+- `factorial`: computes a bounded factorial, scaling the input from `input_size_mb`.
+- `csv_summary`: streams a CSV from a `gs://bucket/object` URI included in the
+  description. The declared input size is capped at 500 MB. The GKE workload
+  identity for `greenscale-executor` needs read-only access to the source bucket.
+  For GKE Workload Identity, link that Kubernetes service account to a Google
+  service account and grant `roles/storage.objectViewer` on the input bucket only.
+  The cluster must have Workload Identity Federation enabled.
+
+Build and publish the image tag referenced by the Kubernetes manifests, then apply
+the manifests to the `greenscale` namespace:
+
+```bash
+docker build -t vachi1522/greenscale-api:workload-executor-v1 .
+docker push vachi1522/greenscale-api:workload-executor-v1
+kubectl apply -f k8s/executor-rbac.yaml
+kubectl apply -f k8s/dispatcher-cronjob.yaml
+kubectl apply -f k8s/api-deployment.yaml
+```
+
+Check the dispatcher and workload Jobs with `kubectl get jobs -n greenscale`. A
+workload job is named `gs-<GreenScale job id>`; inspect its output with
+`kubectl logs job/gs-<id> -n greenscale`. CSV jobs need an accessible Cloud
+Storage object URI; the UI does not upload files.

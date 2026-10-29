@@ -14,7 +14,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: dispatcher
-              image: vachi1522/greenscale-api:dispatcher-phase3
+              image: vachi1522/greenscale-api:workload-executor-v1
               imagePullPolicy: Always
               command: ["python", "-m", "execution.dispatcher"]
               env:
@@ -23,3 +23,5 @@ spec:
                     secretKeyRef:
                       name: greenscale-db-secret
                       key: database-url
+                - name: GREEN_SCALE_WORKER_IMAGE
+                  value: vachi1522/greenscale-api:workload-executor-v1

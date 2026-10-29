@@ -1,20 +1,23 @@
-"""One-shot dispatcher that claims due GreenScale jobs and submits Kubernetes Jobs."""
+"""Dispatch due GreenScale jobs and reconcile Kubernetes execution status."""
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
-from execution.job_executor import get_job_status, submit_once
+from execution.job_executor import LEGACY_IMAGE, WORKER_IMAGE, get_job_status, submit_once
 
 DEFAULT_NAMESPACE = "greenscale"
-DEFAULT_IMAGE = "busybox:1.36"
+DEFAULT_IMAGE = WORKER_IMAGE
+_GCS_URI_RE = re.compile(r"gs://[^\s\"'<>]+")
 
 
 @dataclass(frozen=True)
@@ -24,30 +27,107 @@ class DispatchResult:
     error_type: str | None = None
 
 
+def _gcs_uri_from_description(description: str | None) -> str | None:
+    if not description:
+        return None
+    match = _GCS_URI_RE.search(description)
+    if not match:
+        return None
+    return match.group(0).rstrip(".,;:!?)]}")
+
+
+def _worker_command(job: Job) -> list[str]:
+    if job.workload_type == "sleep":
+        seconds = min(max(int(job.estimated_minutes or 1), 1), 1440) * 60
+        return ["python", "-m", "execution.worker", "sleep", "--seconds", str(seconds)]
+    if job.workload_type == "factorial":
+        input_size_mb = min(max(int(job.input_size_mb or 1), 1), 500)
+        return ["python", "-m", "execution.worker", "factorial", "--input-size-mb", str(input_size_mb)]
+    if job.workload_type == "csv_summary":
+        uri = _gcs_uri_from_description(job.description)
+        if not uri:
+            raise ValueError("csv_summary requires a gs://bucket/object URI in the job description")
+        parsed = urlsplit(uri)
+        if parsed.scheme != "gs" or not parsed.netloc or not parsed.path.lstrip("/"):
+            raise ValueError("csv_summary input must be a gs://bucket/object URI")
+        max_size_mb = min(max(int(job.input_size_mb or 500), 1), 500)
+        return [
+            "python", "-m", "execution.worker", "csv-summary",
+            "--gcs-uri", uri, "--max-size-mb", str(max_size_mb),
+        ]
+    raise ValueError(f"Unsupported workload_type: {job.workload_type!r}")
+
+
 def job_to_executor_request(
     job: Job,
     *,
-    image: str = DEFAULT_IMAGE,
+    image: str | None = None,
     namespace: str = DEFAULT_NAMESPACE,
 ) -> dict[str, Any]:
-    """Adapt a due database job to the executor's independent request contract.
-
-    This integration stage submits a harmless echo workload as an execution
-    probe. Replace its image/command mapping when a real workload runner exists.
-    """
+    """Translate stored workload metadata into an allowlisted worker command."""
     if job.scheduled_for is None:
         raise ValueError(f"Job {job.id} has no scheduled_for timestamp")
     scheduled = job.scheduled_for
     if scheduled.tzinfo is None:
         scheduled = scheduled.replace(tzinfo=timezone.utc)
     scheduled = scheduled.astimezone(timezone.utc)
+
+    if job.workload_type is None:
+        if job.description:
+            raise ValueError("job description did not resolve to a supported workload type")
+        # Preserve old probe behavior only for legacy records without descriptions.
+        selected_image = image or LEGACY_IMAGE
+        command = ["echo", f"GreenScale legacy job {job.id}: {job.name}"]
+    else:
+        selected_image = image or DEFAULT_IMAGE
+        command = _worker_command(job)
     return {
         "job_id": str(job.id),
-        "image": image,
-        "command": ["echo", f"GreenScale job {job.id}: {job.name}"],
+        "image": selected_image,
+        "command": command,
         "scheduled_start_utc": scheduled.isoformat().replace("+00:00", "Z"),
         "namespace": namespace,
     }
+
+
+def _reconcile_running_jobs(
+    db: Session, batch_api: Any, *, now: datetime, namespace: str, limit: int
+) -> list[DispatchResult]:
+    statement = (
+        select(Job)
+        .where(Job.status == JobStatus.RUNNING, Job.k8s_job_name.is_not(None))
+        .order_by(Job.id)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    jobs = list(db.scalars(statement).all())
+    references = [(job.id, job.k8s_job_name) for job in jobs]
+    db.commit()
+
+    results: list[DispatchResult] = []
+    for job_id, job_name in references:
+        try:
+            executor_status = get_job_status(batch_api, job_name, namespace)
+        except Exception as exc:
+            db.rollback()
+            results.append(DispatchResult(job_id, "status_check_error", type(exc).__name__))
+            continue
+
+        job = db.get(Job, job_id)
+        if job is None:
+            results.append(DispatchResult(job_id, "record_missing"))
+            continue
+        if executor_status == "succeeded":
+            job.status = JobStatus.SUCCEEDED
+            job.finished_at = job.finished_at or now
+        elif executor_status == "failed":
+            job.status = JobStatus.FAILED
+            job.finished_at = job.finished_at or now
+        elif executor_status == "running" and job.started_at is None:
+            job.started_at = now
+        db.commit()
+        results.append(DispatchResult(job_id, f"status_{executor_status}"))
+    return results
 
 
 def dispatch_due_jobs(
@@ -56,21 +136,20 @@ def dispatch_due_jobs(
     *,
     now: datetime | None = None,
     namespace: str = DEFAULT_NAMESPACE,
-    image: str = DEFAULT_IMAGE,
+    image: str | None = None,
     limit: int = 50,
 ) -> list[DispatchResult]:
-    """Atomically claim due waiting jobs, submit each once, and persist status.
-
-    `FOR UPDATE SKIP LOCKED` prevents competing dispatcher processes from
-    claiming the same rows. Deterministic Job names make retry after uncertain
-    API errors idempotent (the retry receives an HTTP 409 and checks that Job).
-    """
+    """Reconcile running jobs and submit each due waiting job once."""
     if limit < 1:
         raise ValueError("limit must be positive")
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(timezone.utc)
+
+    results = _reconcile_running_jobs(
+        db, batch_api, now=now, namespace=namespace, limit=limit
+    )
 
     statement = (
         select(Job)
@@ -87,14 +166,21 @@ def dispatch_due_jobs(
     requests: list[tuple[int, str, dict[str, Any]]] = []
     for job in claimed:
         job_name = f"gs-{job.id}"
-        request = job_to_executor_request(job, image=image, namespace=namespace)
-        # Claim before the external API call so concurrent dispatchers skip it.
+        try:
+            request = job_to_executor_request(job, image=image, namespace=namespace)
+        except ValueError as exc:
+            job.status = JobStatus.FAILED
+            job.finished_at = now
+            job.decision_reason = (
+                f"{job.decision_reason or 'Scheduled'}; execution configuration failed: {exc}"
+            )
+            results.append(DispatchResult(job.id, "configuration_error", "ValueError"))
+            continue
         job.status = JobStatus.RUNNING
         job.k8s_job_name = job_name
         requests.append((job.id, job_name, request))
     db.commit()
 
-    results: list[DispatchResult] = []
     for job_id, job_name, request in requests:
         try:
             outcome = submit_once(batch_api, request)
@@ -110,15 +196,12 @@ def dispatch_due_jobs(
                 job.status = JobStatus.FAILED
                 job.finished_at = now
             else:
-                # pending means the Job exists but has not started a Pod yet.
                 job.status = JobStatus.RUNNING
                 if executor_status == "running" and job.started_at is None:
                     job.started_at = now
             db.commit()
             results.append(DispatchResult(job_id, outcome))
         except Exception as exc:
-            # Keep the deterministic name for safe retry after an uncertain
-            # create response; the next HTTP 409 will be treated idempotently.
             db.rollback()
             job = db.get(Job, job_id)
             if job is not None and job.status == JobStatus.RUNNING:
@@ -130,11 +213,7 @@ def dispatch_due_jobs(
 
 
 def create_batch_api(*, in_cluster: bool | None = None) -> Any:
-    """Load Kubernetes credentials and return a BatchV1Api client.
-
-    By default, in-cluster configuration is selected inside Kubernetes and
-    local kubeconfig is used outside it. Tests inject a mock API directly.
-    """
+    """Load Kubernetes credentials and return a BatchV1Api client."""
     from kubernetes import client, config
 
     if in_cluster is None:
@@ -147,7 +226,7 @@ def create_batch_api(*, in_cluster: bool | None = None) -> Any:
 
 
 def main() -> None:
-    """Run one dispatch pass; schedule this command externally as needed."""
+    """Run one dispatch and reconciliation pass; schedule this command externally."""
     from app.db import SessionLocal
 
     batch_api = create_batch_api()
