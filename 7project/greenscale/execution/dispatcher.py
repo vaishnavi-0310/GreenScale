@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -58,6 +59,7 @@ def dispatch_due_jobs(
     namespace: str = DEFAULT_NAMESPACE,
     image: str = DEFAULT_IMAGE,
     limit: int = 50,
+    job_id: int | None = None,
 ) -> list[DispatchResult]:
     """Atomically claim due waiting jobs, submit each once, and persist status.
 
@@ -72,13 +74,17 @@ def dispatch_due_jobs(
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(timezone.utc)
 
+    conditions = [
+        Job.status == JobStatus.WAITING,
+        Job.scheduled_for.is_not(None),
+        Job.scheduled_for <= now,
+    ]
+    if job_id is not None:
+        conditions.append(Job.id == job_id)
+
     statement = (
         select(Job)
-        .where(
-            Job.status == JobStatus.WAITING,
-            Job.scheduled_for.is_not(None),
-            Job.scheduled_for <= now,
-        )
+        .where(*conditions)
         .order_by(Job.scheduled_for, Job.id)
         .limit(limit)
         .with_for_update(skip_locked=True)
@@ -147,19 +153,30 @@ def create_batch_api(*, in_cluster: bool | None = None) -> Any:
 
 
 def main() -> None:
-    """Run one dispatch pass; schedule this command externally as needed."""
+    """Run one dispatch pass, optionally targeting a single job."""
+    import argparse
+
     from app.db import SessionLocal
+
+    parser = argparse.ArgumentParser(description="Dispatch GreenScale jobs.")
+    parser.add_argument(
+        "--job-id",
+        type=int,
+        help="Dispatch only the specified database job ID.",
+    )
+    args = parser.parse_args()
 
     batch_api = create_batch_api()
     with SessionLocal() as db:
-        results = dispatch_due_jobs(db, batch_api)
+        results = dispatch_due_jobs(db, batch_api, job_id=args.job_id)
+
     if not results:
         print("No due jobs found.")
         return
+
     for result in results:
         suffix = f" ({result.error_type})" if result.error_type else ""
         print(f"Job {result.job_id}: {result.outcome}{suffix}")
-
 
 if __name__ == "__main__":
     main()

@@ -153,3 +153,39 @@ def test_create_batch_api_loads_selected_credentials(monkeypatch, in_cluster, lo
     other_loader = "load_kube_config" if in_cluster else "load_incluster_config"
     getattr(config, other_loader).assert_not_called()
     client.BatchV1Api.assert_called_once_with()
+
+
+def test_dispatch_can_target_one_job_only(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+
+    target = make_job(
+        db_session,
+        scheduled_for=now - timedelta(minutes=1),
+        name="isolated test job",
+    )
+    other = make_job(
+        db_session,
+        scheduled_for=now - timedelta(minutes=1),
+        name="must remain waiting",
+    )
+
+    api = Mock()
+    api.read_namespaced_job_status.return_value = SimpleNamespace(
+        status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
+    )
+
+    results = dispatch_due_jobs(
+        db_session,
+        api,
+        now=now,
+        job_id=target.id,
+    )
+
+    db_session.refresh(target)
+    db_session.refresh(other)
+
+    assert len(results) == 1
+    assert results[0].job_id == target.id
+    assert target.status == JobStatus.SUCCEEDED
+    assert other.status == JobStatus.WAITING
+    api.create_namespaced_job.assert_called_once()
