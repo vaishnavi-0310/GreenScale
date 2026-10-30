@@ -8,7 +8,7 @@ metadata:
 
 spec:
   # Run the planner once every minute
-  schedule: "* * * * *"
+  schedule: "*/5 * * * *"
 
   # Prevent overlapping planner executions
   concurrencyPolicy: Forbid
