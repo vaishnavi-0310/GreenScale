@@ -231,3 +231,96 @@ def test_failure_reading_times_does_not_undo_the_status_update(db_session):
     assert results[0].outcome == "submitted"
     assert job.status == JobStatus.SUCCEEDED
     assert job.finished_at.replace(tzinfo=timezone.utc) == now
+
+
+def status_sequence(*items):
+    """Return each item in turn, then keep returning the last one."""
+    remaining = iter(items)
+
+    def _next(**kwargs):
+        return next(remaining, items[-1])
+
+    return _next
+
+
+PENDING = SimpleNamespace(
+    status=SimpleNamespace(succeeded=0, failed=0, active=0, conditions=[])
+)
+DONE = SimpleNamespace(
+    status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
+)
+
+
+def test_dispatch_polls_until_the_job_finishes(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    api = Mock()
+    api.read_namespaced_job.side_effect = status_sequence(PENDING, PENDING, DONE)
+    sleep = Mock()
+
+    dispatch_due_jobs(db_session, api, now=now, wait_seconds=10, sleep=sleep)
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.SUCCEEDED
+    assert sleep.call_count == 2
+
+
+def test_dispatch_stops_waiting_after_the_limit(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    api = Mock()
+    api.read_namespaced_job.side_effect = status_sequence(PENDING)
+    sleep = Mock()
+
+    dispatch_due_jobs(db_session, api, now=now, wait_seconds=3, sleep=sleep)
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.RUNNING
+    assert sleep.call_count == 3
+
+
+def test_dispatch_does_not_wait_by_default(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    api = Mock()
+    api.read_namespaced_job.side_effect = status_sequence(PENDING)
+    sleep = Mock()
+
+    dispatch_due_jobs(db_session, api, now=now, sleep=sleep)
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.RUNNING
+    sleep.assert_not_called()
+
+
+def test_api_error_detail_shows_http_status_and_message(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+
+    class Forbidden(Exception):
+        status = 403
+        reason = "Forbidden"
+        body = "jobs.batch gs-1 is forbidden"
+
+    api = Mock()
+    api.create_namespaced_job.side_effect = Forbidden()
+
+    results = dispatch_due_jobs(db_session, api, now=now)
+
+    db_session.refresh(job)
+    assert results[0].outcome == "error"
+    assert "403" in results[0].error_detail
+    assert "forbidden" in results[0].error_detail.lower()
+    assert job.status == JobStatus.WAITING
+
+
+def test_non_api_errors_have_no_detail(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    api = Mock()
+    api.create_namespaced_job.side_effect = RuntimeError("temporary API error")
+
+    results = dispatch_due_jobs(db_session, api, now=now)
+
+    assert results[0].error_type == "RuntimeError"
+    assert results[0].error_detail is None

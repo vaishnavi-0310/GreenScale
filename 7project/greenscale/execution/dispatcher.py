@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import argparse
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +25,19 @@ class DispatchResult:
     job_id: int
     outcome: str
     error_type: str | None = None
+    error_detail: str | None = None
+
+
+def describe_error(exc: Exception) -> str | None:
+    """Short description of a Kubernetes API error: HTTP status, reason and message."""
+    status = getattr(exc, "status", None)
+    if status is None:
+        return None
+    detail = f"HTTP {status} {getattr(exc, 'reason', '') or ''}".strip()
+    body = getattr(exc, "body", None)
+    if isinstance(body, str) and body:
+        detail += f": {body[:400]}"
+    return detail
 
 
 def job_to_executor_request(
@@ -61,6 +75,9 @@ def dispatch_due_jobs(
     image: str = DEFAULT_IMAGE,
     limit: int = 50,
     job_id: int | None = None,
+    wait_seconds: float = 0,
+    poll_interval: float = 1.0,
+    sleep: Any = time.sleep,
 ) -> list[DispatchResult]:
     """Atomically claim due waiting jobs, submit each once, and persist status.
 
@@ -102,13 +119,23 @@ def dispatch_due_jobs(
     db.commit()
 
     results: list[DispatchResult] = []
-    for job_id, job_name, request in requests:
+    max_polls = (
+        int(wait_seconds // poll_interval)
+        if wait_seconds > 0 and poll_interval > 0
+        else 0
+    )
+    for claimed_id, job_name, request in requests:
         try:
             outcome = submit_once(batch_api, request)
             executor_status = get_job_status(batch_api, job_name, namespace)
-            job = db.get(Job, job_id)
+            polls = 0
+            while executor_status not in {"succeeded", "failed"} and polls < max_polls:
+                sleep(poll_interval)
+                executor_status = get_job_status(batch_api, job_name, namespace)
+                polls += 1
+            job = db.get(Job, claimed_id)
             if job is None:
-                results.append(DispatchResult(job_id, "submitted_job_record_missing"))
+                results.append(DispatchResult(claimed_id, "submitted_job_record_missing"))
                 continue
             # Prefer the times Kubernetes recorded. Reading them is best effort:
             # a failure here must never undo the status update.
@@ -134,16 +161,18 @@ def dispatch_due_jobs(
                 if executor_status == "running" and job.started_at is None:
                     job.started_at = now
             db.commit()
-            results.append(DispatchResult(job_id, outcome))
+            results.append(DispatchResult(claimed_id, outcome))
         except Exception as exc:
             # Keep the deterministic name for safe retry after an uncertain
             # create response; the next HTTP 409 will be treated idempotently.
             db.rollback()
-            job = db.get(Job, job_id)
+            job = db.get(Job, claimed_id)
             if job is not None and job.status == JobStatus.RUNNING:
                 job.status = JobStatus.WAITING
                 db.commit()
-            results.append(DispatchResult(job_id, "error", type(exc).__name__))
+            results.append(
+                DispatchResult(claimed_id, "error", type(exc).__name__, describe_error(exc))
+            )
 
     return results
 
@@ -167,8 +196,6 @@ def create_batch_api(*, in_cluster: bool | None = None) -> Any:
 
 def main() -> None:
     """Run one dispatch pass, optionally targeting a single job."""
-    import argparse
-
     from app.db import SessionLocal
 
     parser = argparse.ArgumentParser(description="Dispatch GreenScale jobs.")
@@ -177,11 +204,19 @@ def main() -> None:
         type=int,
         help="Dispatch only the specified database job ID.",
     )
+    parser.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=30.0,
+        help="Seconds to wait for a submitted Job to finish (0 = do not wait).",
+    )
     args = parser.parse_args()
 
     batch_api = create_batch_api()
     with SessionLocal() as db:
-        results = dispatch_due_jobs(db, batch_api, job_id=args.job_id)
+        results = dispatch_due_jobs(
+            db, batch_api, job_id=args.job_id, wait_seconds=args.wait_seconds
+        )
 
     if not results:
         print("No due jobs found.")
@@ -190,6 +225,8 @@ def main() -> None:
     for result in results:
         suffix = f" ({result.error_type})" if result.error_type else ""
         print(f"Job {result.job_id}: {result.outcome}{suffix}")
+        if result.error_detail:
+            print(f"  detail: {result.error_detail}")
 
 if __name__ == "__main__":
     main()
