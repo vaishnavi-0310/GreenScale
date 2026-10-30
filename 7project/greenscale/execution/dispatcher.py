@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import argparse
 import time
 from dataclasses import dataclass
@@ -14,7 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
-from execution.job_executor import get_job_status, submit_once
+from execution.job_executor import (
+    LEGACY_IMAGE,
+    WORKER_IMAGE,
+    get_job_status,
+    submit_once,
+)
 from execution.job_times import get_job_times
 
 DEFAULT_NAMESPACE = "greenscale"
@@ -183,6 +189,7 @@ def dispatch_due_jobs(
     )
     claimed = list(db.scalars(statement).all())
     requests: list[tuple[int, str, dict[str, Any]]] = []
+    results: list[DispatchResult] = []
     for job in claimed:
         job_name = f"gs-{job.id}"
         try:
@@ -200,7 +207,6 @@ def dispatch_due_jobs(
         requests.append((job.id, job_name, request))
     db.commit()
 
-    results: list[DispatchResult] = []
     max_polls = (
         int(wait_seconds // poll_interval)
         if wait_seconds > 0 and poll_interval > 0

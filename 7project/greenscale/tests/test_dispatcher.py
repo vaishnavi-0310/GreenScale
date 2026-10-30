@@ -49,7 +49,7 @@ def test_request_adapter_produces_executor_contract(db_session):
     assert request == {
         "job_id": str(job.id),
         "image": "busybox:1.36",
-        "command": ["echo", f"GreenScale job {job.id}: demo"],
+        "command": ["echo", f"GreenScale legacy job {job.id}: demo"],
         "scheduled_start_utc": "2026-10-28T12:00:00Z",
         "namespace": "greenscale",
     }
