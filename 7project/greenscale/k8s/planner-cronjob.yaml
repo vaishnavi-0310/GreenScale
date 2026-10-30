@@ -1,0 +1,60 @@
+
+apiVersion: batch/v1
+kind: CronJob
+
+metadata:
+  name: greenscale-planner
+  namespace: greenscale
+
+spec:
+  # Run the planner once every minute
+  schedule: "* * * * *"
+
+  # Prevent overlapping planner executions
+  concurrencyPolicy: Forbid
+
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+
+      template:
+        spec:
+          serviceAccountName: greenscale-api
+          restartPolicy: Never
+
+          containers:
+            - name: planner
+              image: vachi1522/greenscale-api:workload-executor-v1
+              imagePullPolicy: Always
+
+              command:
+                - python
+                - -m
+                - app.plan_pending
+
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: greenscale-db-secret
+                      key: database-url
+
+                - name: USE_VERTEX_AI
+                  value: "true"
+
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: "greenscale-group24-512813"
+
+                - name: GOOGLE_CLOUD_LOCATION
+                  value: "global"
+
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
