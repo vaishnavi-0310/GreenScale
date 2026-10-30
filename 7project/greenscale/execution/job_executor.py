@@ -121,7 +121,7 @@ def is_terminal_failed(job: Any) -> bool:
 
 def get_job_status(batch_api: Any, name: str, namespace: str) -> str:
     """Map Kubernetes Job conditions/counters to executor lifecycle states."""
-    job = batch_api.read_namespaced_job_status(name=name, namespace=namespace)
+    job = batch_api.read_namespaced_job(name=name, namespace=namespace)
     status = job.status
     conditions = getattr(status, "conditions", None) or []
     if any(condition.type == "Complete" and condition.status == "True"

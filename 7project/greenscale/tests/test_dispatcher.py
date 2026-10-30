@@ -62,7 +62,7 @@ def test_dispatch_claims_due_job_and_persists_terminal_status(db_session):
         scheduled_for=now - timedelta(minutes=1),
     )
     api = Mock()
-    api.read_namespaced_job_status.return_value = SimpleNamespace(
+    api.read_namespaced_job.return_value = SimpleNamespace(
         status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
     )
 
@@ -93,7 +93,7 @@ def test_dispatch_is_retry_safe_when_kubernetes_reports_conflict(db_session):
     class Conflict(Exception):
         status = 409
     api.create_namespaced_job.side_effect = Conflict()
-    api.read_namespaced_job_status.return_value = SimpleNamespace(
+    api.read_namespaced_job.return_value = SimpleNamespace(
         status=SimpleNamespace(succeeded=0, failed=0, active=0, conditions=[])
     )
 
@@ -117,7 +117,7 @@ def test_dispatch_releases_claim_after_api_error_for_retry(db_session):
     assert results[0].outcome == "error"
     assert results[0].error_type == "RuntimeError"
     assert job.status == JobStatus.WAITING
-    api.read_namespaced_job_status.assert_not_called()
+    api.read_namespaced_job.assert_not_called()
 
 
 def test_dispatch_requires_timezone_aware_now(db_session):
@@ -170,7 +170,7 @@ def test_dispatch_can_target_one_job_only(db_session):
     )
 
     api = Mock()
-    api.read_namespaced_job_status.return_value = SimpleNamespace(
+    api.read_namespaced_job.return_value = SimpleNamespace(
         status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
     )
 

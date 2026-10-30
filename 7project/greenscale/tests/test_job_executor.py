@@ -84,13 +84,13 @@ def test_submit_once_reraises_non_conflict_api_errors():
 ])
 def test_maps_job_counters_to_states(status, expected):
     api = Mock()
-    api.read_namespaced_job_status.return_value.status = status
+    api.read_namespaced_job.return_value.status = status
     assert get_job_status(api, "gs-demo-001", "greenscale") == expected
 
 
 def test_complete_condition_maps_to_success():
     api = Mock()
-    api.read_namespaced_job_status.return_value.status = SimpleNamespace(
+    api.read_namespaced_job.return_value.status = SimpleNamespace(
         succeeded=0, failed=0, active=0,
         conditions=[SimpleNamespace(type="Complete", status="True")],
     )
@@ -103,14 +103,14 @@ def test_terminal_failed_condition_wins_over_retryable_failed_counter():
         succeeded=0, failed=1, active=0,
         conditions=[SimpleNamespace(type="Failed", status="True")],
     ))
-    api.read_namespaced_job_status.return_value = job
+    api.read_namespaced_job.return_value = job
     assert is_terminal_failed(job)
     assert get_job_status(api, "gs-demo-001", "greenscale") == "failed"
 
 
 def test_failed_pod_counter_without_terminal_condition_remains_pending():
     api = Mock()
-    api.read_namespaced_job_status.return_value.status = SimpleNamespace(
+    api.read_namespaced_job.return_value.status = SimpleNamespace(
         succeeded=0, failed=1, active=0, conditions=[]
     )
     assert get_job_status(api, "gs-demo-001", "greenscale") == "pending"
@@ -118,7 +118,7 @@ def test_failed_pod_counter_without_terminal_condition_remains_pending():
 
 def test_active_job_with_retryable_failed_pod_is_running():
     api = Mock()
-    api.read_namespaced_job_status.return_value.status = SimpleNamespace(
+    api.read_namespaced_job.return_value.status = SimpleNamespace(
         succeeded=0, failed=1, active=1, conditions=[]
     )
     assert get_job_status(api, "gs-demo-001", "greenscale") == "running"
