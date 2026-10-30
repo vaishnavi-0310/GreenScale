@@ -18,11 +18,11 @@ def main() -> None:
 
     print(f"Submission: {submit_once(api, request)}")
     job_name = "gs-demo-001"
-    api.read_namespaced_job_status.return_value = SimpleNamespace(
+    api.read_namespaced_job.return_value = SimpleNamespace(
         status=SimpleNamespace(succeeded=0, failed=0, active=1, conditions=[])
     )
     print(f"Status: {get_job_status(api, job_name, request['namespace'])}")
-    api.read_namespaced_job_status.return_value = SimpleNamespace(
+    api.read_namespaced_job.return_value = SimpleNamespace(
         status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
     )
     print(f"Status: {get_job_status(api, job_name, request['namespace'])}")
