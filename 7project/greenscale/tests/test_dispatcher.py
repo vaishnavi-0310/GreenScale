@@ -189,3 +189,45 @@ def test_dispatch_can_target_one_job_only(db_session):
     assert target.status == JobStatus.SUCCEEDED
     assert other.status == JobStatus.WAITING
     api.create_namespaced_job.assert_called_once()
+
+def test_dispatch_stores_kubernetes_start_and_finish_times(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    k8s_start = datetime(2026, 10, 28, 12, 59, 50, tzinfo=timezone.utc)
+    k8s_end = datetime(2026, 10, 28, 12, 59, 54, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    api = Mock()
+    api.read_namespaced_job.return_value = SimpleNamespace(
+        status=SimpleNamespace(
+            succeeded=1,
+            failed=0,
+            active=0,
+            conditions=[],
+            start_time=k8s_start,
+            completion_time=k8s_end,
+        )
+    )
+
+    dispatch_due_jobs(db_session, api, now=now)
+
+    db_session.refresh(job)
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.started_at.replace(tzinfo=timezone.utc) == k8s_start
+    assert job.finished_at.replace(tzinfo=timezone.utc) == k8s_end
+
+
+def test_failure_reading_times_does_not_undo_the_status_update(db_session):
+    now = datetime(2026, 10, 28, 13, tzinfo=timezone.utc)
+    job = make_job(db_session, scheduled_for=now - timedelta(minutes=1))
+    finished = SimpleNamespace(
+        status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])
+    )
+    api = Mock()
+    # First read gives the status, the second read (for the times) fails.
+    api.read_namespaced_job.side_effect = [finished, RuntimeError("boom")]
+
+    results = dispatch_due_jobs(db_session, api, now=now)
+
+    db_session.refresh(job)
+    assert results[0].outcome == "submitted"
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.finished_at.replace(tzinfo=timezone.utc) == now

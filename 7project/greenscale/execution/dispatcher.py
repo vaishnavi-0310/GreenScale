@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus
 from execution.job_executor import get_job_status, submit_once
+from execution.job_times import get_job_times
 
 DEFAULT_NAMESPACE = "greenscale"
 DEFAULT_IMAGE = "busybox:1.36"
@@ -109,12 +110,24 @@ def dispatch_due_jobs(
             if job is None:
                 results.append(DispatchResult(job_id, "submitted_job_record_missing"))
                 continue
+            # Prefer the times Kubernetes recorded. Reading them is best effort:
+            # a failure here must never undo the status update.
+            k8s_started = k8s_finished = None
+            if executor_status in {"succeeded", "failed", "running"}:
+                try:
+                    k8s_started, k8s_finished = get_job_times(
+                        batch_api, job_name, namespace
+                    )
+                except Exception:
+                    pass
+            if k8s_started is not None and job.started_at is None:
+                job.started_at = k8s_started
             if executor_status == "succeeded":
                 job.status = JobStatus.SUCCEEDED
-                job.finished_at = now
+                job.finished_at = k8s_finished or now
             elif executor_status == "failed":
                 job.status = JobStatus.FAILED
-                job.finished_at = now
+                job.finished_at = k8s_finished or now
             else:
                 # pending means the Job exists but has not started a Pod yet.
                 job.status = JobStatus.RUNNING
