@@ -14,7 +14,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: dispatcher
-              image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:dispatcher-v3
+              image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:sleep-fix-v1
               imagePullPolicy: Always
               command: ["python", "-m", "execution.dispatcher"]
               env:
@@ -24,4 +24,4 @@ spec:
                       name: greenscale-db-secret
                       key: database-url
                 - name: GREEN_SCALE_WORKER_IMAGE
-                  value: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:dispatcher-v3
+                  value: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:sleep-fix-v1
