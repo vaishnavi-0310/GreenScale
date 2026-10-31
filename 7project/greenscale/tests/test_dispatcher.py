@@ -324,3 +324,42 @@ def test_non_api_errors_have_no_detail(db_session):
 
     assert results[0].error_type == "RuntimeError"
     assert results[0].error_detail is None
+
+
+@pytest.mark.parametrize(
+    "description, expected_seconds",
+    [
+        ("Run a sleep job for 30 sec", "30"),
+        ("Run a sleep workload for 60 seconds with high priority.", "60"),
+        ("Sleep for 45 seconds.", "45"),
+    ],
+)
+def test_sleep_worker_uses_requested_seconds(db_session, description, expected_seconds):
+    job = make_job(
+        db_session,
+        scheduled_for=datetime(2026, 10, 28, 12, tzinfo=timezone.utc),
+    )
+    job.workload_type = "sleep"
+    job.description = description
+    db_session.commit()
+
+    request = job_to_executor_request(job)
+    assert request["command"] == [
+        "python", "-m", "execution.worker", "sleep", "--seconds", expected_seconds,
+    ]
+
+
+def test_sleep_worker_uses_estimate_when_duration_unspecified(db_session):
+    job = make_job(
+        db_session,
+        scheduled_for=datetime(2026, 10, 28, 12, tzinfo=timezone.utc),
+    )
+    job.workload_type = "sleep"
+    job.description = "Run a sleep workload"
+    job.estimated_minutes = 2
+    db_session.commit()
+
+    request = job_to_executor_request(job)
+    assert request["command"] == [
+        "python", "-m", "execution.worker", "sleep", "--seconds", "120",
+    ]
