@@ -32,7 +32,7 @@ Do not store database passwords, access tokens, or service account keys in Git.
 | Region | `europe-north1` |
 | Zone | `europe-north1-a` |
 | Namespace | `greenscale` |
-| API Image | `vachi1522/greenscale-api:vertex-v1` |
+| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1` |
 | API Service | `greenscale-api-service` |
 | PostgreSQL Service | `greenscale-postgres` |
 
@@ -96,9 +96,9 @@ Credential creation and database deployment are covered in the following deploym
 
 The current API image is:
 
-`vachi1522/greenscale-api:vertex-v1`
+`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1`
 
-Kubernetes pulls this image from Docker Hub.
+Kubernetes pulls this image from Google Artifact Registry in europe-north1.
 
 The image contains the FastAPI application and its Python dependencies. PostgreSQL is deployed separately.
 
@@ -473,7 +473,7 @@ kubectl get deployment greenscale-api -n greenscale \
 Expected image for the current deployment:
 
 ```text
-vachi1522/greenscale-api:vertex-v1
+europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1
 ```
 
 ### H. Important deployment notes
@@ -815,3 +815,44 @@ After the project, review the GCP Billing console and remove resources that are 
 These commands are documented for reproducibility.
 
 They have **not been executed against the working GreenScale environment**, because the project is still under development.
+
+---
+
+## Phase 3 — Automated Kubernetes Job Execution
+
+### Deployment order
+
+1. Configure executor permissions:
+   `kubectl apply -f k8s/executor-rbac.yaml`
+
+2. Deploy the planner:
+   `kubectl apply -f k8s/planner-cronjob.yaml`
+
+3. Deploy the dispatcher:
+   `kubectl apply -f k8s/dispatcher-cronjob.yaml`
+
+### Verify deployment
+
+Run:
+`kubectl get deployments,cronjobs,pvc -n greenscale`
+
+The planner runs every 5 minutes.
+The dispatcher runs every minute.
+
+### Tested container images
+
+- API: llm-fix-v1
+- Planner: planner-fix-v1
+- Dispatcher: dispatcher-v3
+- Worker: dispatcher-v3
+
+### End-to-end workflow
+
+PENDING → WAITING → RUNNING → SUCCEEDED
+
+The planner schedules jobs, the dispatcher submits them
+to Kubernetes, and the dispatcher synchronizes completed
+job statuses with PostgreSQL.
+
+Do not recreate database Secrets or delete the PostgreSQL
+PVC during routine deployments.
