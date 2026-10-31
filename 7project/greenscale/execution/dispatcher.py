@@ -259,6 +259,15 @@ def dispatch_due_jobs(
                 DispatchResult(claimed_id, "error", type(exc).__name__, describe_error(exc))
             )
 
+    results.extend(
+        _reconcile_running_jobs(
+            db,
+            batch_api,
+            now=datetime.now(timezone.utc),
+            namespace=namespace,
+            limit=limit,
+        )
+    )
     return results
 
 
