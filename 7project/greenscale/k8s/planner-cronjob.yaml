@@ -27,7 +27,7 @@ spec:
 
           containers:
             - name: planner
-              image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:workload-executor-v1
+              image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:planner-fix-v1
               imagePullPolicy: Always
 
               command:

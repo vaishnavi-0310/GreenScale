@@ -119,7 +119,15 @@ def parse_extracted(raw: str, original_text: str) -> JobCreate:
         return JobCreate(
             name=data.name[:200],
             description=original_text,
-            workload_type=data.workload_type,
+            workload_type=(
+                data.workload_type
+                or (
+                    "sleep" if "sleep" in original_text.lower()
+                    else "factorial" if "factorial" in original_text.lower()
+                    else "csv_summary" if "csv" in original_text.lower()
+                    else None
+                )
+            ),
             input_size_mb=data.input_size_mb,
             priority=data.priority,
             deadline=data.deadline,

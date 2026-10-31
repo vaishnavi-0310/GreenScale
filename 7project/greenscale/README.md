@@ -159,11 +159,16 @@ Build and publish the image tag referenced by the Kubernetes manifests, then app
 the manifests to the `greenscale` namespace:
 
 ```bash
-docker build -t vachi1522/greenscale-api:workload-executor-v1 .
-docker push vachi1522/greenscale-api:workload-executor-v1
+# Run from the greenscale project directory.
+# Prerequisites: namespace, database, Secrets, and API ServiceAccount.
+
 kubectl apply -f k8s/executor-rbac.yaml
-kubectl apply -f k8s/dispatcher-cronjob.yaml
 kubectl apply -f k8s/api-deployment.yaml
+kubectl apply -f k8s/planner-cronjob.yaml
+kubectl apply -f k8s/dispatcher-cronjob.yaml
+
+# Verify the deployment
+kubectl get deployments,cronjobs -n greenscale
 ```
 
 Check the dispatcher and workload Jobs with `kubectl get jobs -n greenscale`. A
