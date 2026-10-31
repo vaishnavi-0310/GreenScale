@@ -58,7 +58,10 @@ def plan_pending_job(
         runtime_source = "stored_estimate"
 
     else:
-        # A workload type requires a valid input size.
+        # Workloads without input data default to 0 MB.
+        if input_size_mb is None:
+            input_size_mb = 0
+
         if type(input_size_mb) is not int or input_size_mb < 0:
             raise ValueError(
                 "A non-negative input_size_mb is required"

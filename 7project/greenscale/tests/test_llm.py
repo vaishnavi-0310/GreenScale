@@ -123,3 +123,23 @@ def test_timeout_is_retried_then_reported_unavailable():
     with pytest.raises(LLMUnavailableError):
         extract_job("compress logs", now=NOW, client=client)
     assert client.models.calls == 3
+
+def test_sleep_workload_fallback_when_llm_returns_null():
+    from app.llm import parse_extracted
+
+    raw = '''
+    {
+        "name": "Sleep workload",
+        "priority": "high",
+        "estimated_minutes": 1,
+        "deadline": "2026-11-01T12:00:00Z",
+        "workload_type": null
+    }
+    '''
+
+    job = parse_extracted(
+        raw,
+        "Run a sleep workload for 60 seconds with high priority."
+    )
+
+    assert job.workload_type == "sleep"

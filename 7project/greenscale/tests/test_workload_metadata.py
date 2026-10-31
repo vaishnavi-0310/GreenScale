@@ -192,3 +192,66 @@ def test_planner_uses_stored_metadata(monkeypatch):
         assert "source=test_predictor" in result.decision_reason
 
     engine.dispose()
+
+
+def test_planner_sleep_without_input_size(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    import app.plan_pending as planner
+    from app.models import JobStatus
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+
+    now = datetime.now(timezone.utc)
+    predictor_calls = []
+
+    def fake_predict_runtime(workload_type, input_size_mb):
+        predictor_calls.append((workload_type, input_size_mb))
+        return 60, "test_predictor"
+
+    def fake_choose_start(**kwargs):
+        return SimpleNamespace(
+            status="scheduled",
+            scheduled_start=now,
+            reason="Test scheduling decision",
+            runtime_source="test_predictor",
+        )
+
+    monkeypatch.setattr(planner, "predict_runtime", fake_predict_runtime)
+    monkeypatch.setattr(planner, "choose_start", fake_choose_start)
+
+    try:
+        with Session(engine) as db:
+            job = Job(
+                name="Sleep without input size",
+                workload_type="sleep",
+                input_size_mb=None,
+                priority="high",
+                deadline=now + timedelta(days=1),
+                estimated_minutes=1,
+                status=JobStatus.PENDING,
+            )
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+
+            result = planner.plan_pending_job(
+                db=db,
+                job_id=job.id,
+                prices=[],
+                now=now,
+            )
+
+            assert predictor_calls == [("sleep", 0)]
+            assert result.status == JobStatus.WAITING
+    finally:
+        engine.dispose()
