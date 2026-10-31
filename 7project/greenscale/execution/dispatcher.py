@@ -60,6 +60,16 @@ def _gcs_uri_from_description(description: str | None) -> str | None:
 def _worker_command(job: Job) -> list[str]:
     if job.workload_type == "sleep":
         seconds = min(max(int(job.estimated_minutes or 1), 1), 1440) * 60
+        # Use an explicit sleep duration for execution, not the rounded estimate.
+        match = re.search(
+            r"\bsleep(?:\s+(?:job|workload))?\s+for\s+(\d+)\s*(?:seconds?|secs?|s)\b",
+            job.description or "",
+            flags=re.IGNORECASE,
+        )
+        if match:
+            requested_seconds = int(match.group(1))
+            if 1 <= requested_seconds <= 86400:
+                seconds = requested_seconds
         return ["python", "-m", "execution.worker", "sleep", "--seconds", str(seconds)]
     if job.workload_type == "factorial":
         input_size_mb = min(max(int(job.input_size_mb or 1), 1), 500)
