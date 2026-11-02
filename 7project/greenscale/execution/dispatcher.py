@@ -148,12 +148,22 @@ def _reconcile_running_jobs(
         if job is None:
             results.append(DispatchResult(job_id, "record_missing"))
             continue
+        # Prefer Kubernetes' timestamps over the time of this periodic check.
+        k8s_started = k8s_finished = None
+        if executor_status in ("succeeded", "failed", "running"):
+            try:
+                k8s_started, k8s_finished = get_job_times(batch_api, job_name, namespace)
+            except Exception:
+                # Preserve status reconciliation if Kubernetes timestamps are unavailable.
+                pass
+        if job.started_at is None and k8s_started is not None:
+            job.started_at = k8s_started
         if executor_status == "succeeded":
             job.status = JobStatus.SUCCEEDED
-            job.finished_at = job.finished_at or now
+            job.finished_at = job.finished_at or k8s_finished or now
         elif executor_status == "failed":
             job.status = JobStatus.FAILED
-            job.finished_at = job.finished_at or now
+            job.finished_at = job.finished_at or k8s_finished or now
         elif executor_status == "running" and job.started_at is None:
             job.started_at = now
         db.commit()

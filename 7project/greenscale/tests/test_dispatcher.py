@@ -363,3 +363,57 @@ def test_sleep_worker_uses_estimate_when_duration_unspecified(db_session):
     assert request["command"] == [
         "python", "-m", "execution.worker", "sleep", "--seconds", "120",
     ]
+
+@pytest.mark.parametrize("outcome", ["succeeded", "failed"])
+def test_reconciliation_uses_kubernetes_completion_not_poll_time(db_session, outcome):
+    from execution.dispatcher import _reconcile_running_jobs
+
+    now = datetime(2026, 11, 2, 13, 0, 5, tzinfo=timezone.utc)
+    started = datetime(2026, 11, 2, 12, 58, 4, tzinfo=timezone.utc)
+    completed = datetime(2026, 11, 2, 12, 59, 23, tzinfo=timezone.utc)
+    job = make_job(db_session, status=JobStatus.RUNNING, scheduled_for=started)
+    job.k8s_job_name = f"gs-{job.id}"
+    db_session.commit()
+
+    api = Mock()
+    api.read_namespaced_job.return_value = SimpleNamespace(
+        status=SimpleNamespace(
+            succeeded=int(outcome == "succeeded"),
+            failed=int(outcome == "failed"),
+            active=0,
+            conditions=(
+                [SimpleNamespace(type="Failed", status="True", last_transition_time=completed)]
+                if outcome == "failed" else []
+            ),
+            start_time=started,
+            completion_time=completed,
+        )
+    )
+    results = _reconcile_running_jobs(
+        db_session, api, now=now, namespace="greenscale", limit=50
+    )
+    db_session.refresh(job)
+    assert results[0].outcome == f"status_{outcome}"
+    assert job.status == (JobStatus.SUCCEEDED if outcome == "succeeded" else JobStatus.FAILED)
+    assert job.started_at.replace(tzinfo=timezone.utc) == started
+    assert job.finished_at.replace(tzinfo=timezone.utc) == completed
+
+
+def test_reconciliation_falls_back_when_kubernetes_timestamps_unavailable(db_session):
+    from execution.dispatcher import _reconcile_running_jobs
+
+    now = datetime(2026, 11, 2, 13, 0, 5, tzinfo=timezone.utc)
+    job = make_job(db_session, status=JobStatus.RUNNING, scheduled_for=now)
+    job.k8s_job_name = f"gs-{job.id}"
+    db_session.commit()
+
+    api = Mock()
+    api.read_namespaced_job.side_effect = [
+        SimpleNamespace(status=SimpleNamespace(succeeded=1, failed=0, active=0, conditions=[])),
+        RuntimeError("timestamp fetch unavailable"),
+    ]
+    results = _reconcile_running_jobs(db_session, api, now=now, namespace="greenscale", limit=50)
+    db_session.refresh(job)
+    assert results[0].outcome == "status_succeeded"
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.finished_at.replace(tzinfo=timezone.utc) == now
