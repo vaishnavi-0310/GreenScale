@@ -132,13 +132,13 @@ def test_sleep_workload_fallback_when_llm_returns_null():
         "name": "Sleep workload",
         "priority": "high",
         "estimated_minutes": 1,
-        "deadline": "2026-11-01T12:00:00Z",
+        "deadline": "__DEADLINE__",
         "workload_type": null
     }
     '''
 
     job = parse_extracted(
-        raw,
+        raw.replace("__DEADLINE__", DEADLINE),
         "Run a sleep workload for 60 seconds with high priority."
     )
 
