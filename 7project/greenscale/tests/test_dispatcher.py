@@ -343,7 +343,10 @@ def test_reconciliation_uses_kubernetes_completion_not_poll_time(db_session, out
             succeeded=int(outcome == "succeeded"),
             failed=int(outcome == "failed"),
             active=0,
-            conditions=[],
+            conditions=(
+                [SimpleNamespace(type="Failed", status="True", last_transition_time=completed)]
+                if outcome == "failed" else []
+            ),
             start_time=started,
             completion_time=completed,
         )
