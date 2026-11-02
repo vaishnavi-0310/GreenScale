@@ -29,7 +29,7 @@ def db_session():
 def make_job(db, *, status=JobStatus.WAITING, scheduled_for=None, name="demo"):
     job = Job(
         name=name,
-        deadline=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        deadline=datetime.now(timezone.utc) + timedelta(days=365),
         estimated_minutes=1,
         status=status,
         scheduled_for=scheduled_for,
