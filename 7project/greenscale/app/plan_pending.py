@@ -1,6 +1,6 @@
-
 from datetime import datetime, timezone
 from math import ceil
+import re
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.models import Job, JobStatus
 from app.predictor import predict_runtime
 from app.scheduler import choose_start
+
 
 def get_pending_jobs(db: Session) -> list[Job]:
     """Retrieve all pending jobs from PostgreSQL."""
@@ -19,6 +20,7 @@ def get_pending_jobs(db: Session) -> list[Job]:
     )
 
     return list(db.scalars(statement).all())
+
 
 def plan_pending_job(
     db: Session,
@@ -67,17 +69,31 @@ def plan_pending_job(
                 "A non-negative input_size_mb is required"
             )
 
-        runtime_seconds, runtime_source = predict_runtime(
-            workload_type=workload_type,
-            input_size_mb=input_size_mb,
-        )
+        # Match the explicit sleep syntax supported by execution/dispatcher.py.
+        # Do not ask the LLM to guess a duration already given by the user.
+        match = None
+        if workload_type == "sleep":
+            match = re.search(
+                r"\bsleep(?:\s+(?:job|workload))?\s+for\s+(\d+)\s*(?:seconds?|secs?|s)\b",
+                job.description or "",
+                flags=re.IGNORECASE,
+            )
+
+        if match and 1 <= int(match.group(1)) <= 86400:
+            runtime_seconds = int(match.group(1))
+            runtime_source = "explicit_duration"
+        else:
+            runtime_seconds, runtime_source = predict_runtime(
+                workload_type=workload_type,
+                input_size_mb=input_size_mb,
+            )
 
     if type(runtime_seconds) is not int or runtime_seconds <= 0:
         raise ValueError(
             "Runtime prediction must be a positive integer"
         )
 
-    # 5. Calculate the best starting time
+    # 6. Calculate the best starting time
     decision = choose_start(
         job_id=job.id,
         job_type="etl",
@@ -89,7 +105,7 @@ def plan_pending_job(
         runtime_source=runtime_source,
     )
 
-    # 6. Update the job status and start time
+    # 7. Update the job status and start time
     if decision.status == "waiting_prices":
         job.status = JobStatus.PENDING
         job.scheduled_for = None
@@ -104,7 +120,7 @@ def plan_pending_job(
     else:
         raise ValueError("Unexpected scheduling decision")
 
-    # 7. Record why the decision was made
+    # 8. Record why the decision was made
     job.decision_reason = (
         f"{decision.reason}; source={decision.runtime_source}"
     )
@@ -115,7 +131,7 @@ def plan_pending_job(
             1, ceil(runtime_seconds / 60)
         )
 
-    # 8. Save changes permanently
+    # 9. Save changes permanently
     try:
         db.commit()
         db.refresh(job)
