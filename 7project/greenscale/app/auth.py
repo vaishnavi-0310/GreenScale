@@ -180,7 +180,22 @@ def register(
             status_code=409, detail="An account with this email already exists"
         ) from exc
     db.refresh(user)
-    _create_session(user, request, response, db)
+    # Registration must leave the browser signed out, including when it had
+    # a previous session cookie from an earlier registration flow.
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        existing_session = db.get(UserSession, _token_hash(token))
+        if existing_session is not None:
+            db.delete(existing_session)
+            db.commit()
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=request.url.scheme == "https" or forwarded_proto == "https",
+        samesite="lax",
+    )
     return user
 
 

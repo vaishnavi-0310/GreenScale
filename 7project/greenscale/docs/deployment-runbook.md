@@ -32,7 +32,7 @@ Do not store database passwords, access tokens, or service account keys in Git.
 | Region | `europe-north1` |
 | Zone | `europe-north1-a` |
 | Namespace | `greenscale` |
-| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1` |
+| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2` |
 | API Service | `greenscale-api-service` |
 | PostgreSQL Service | `greenscale-postgres` |
 
@@ -96,7 +96,7 @@ Credential creation and database deployment are covered in the following deploym
 
 The current API manifest uses:
 
-`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1`
+`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2`
 
 Kubernetes pulls this image from Google Artifact Registry in europe-north1.
 
@@ -462,7 +462,7 @@ kubectl get deployment greenscale-api -n greenscale \
 Expected image for the current deployment:
 
 ```text
-europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1
+europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2
 ```
 
 ### H. Important deployment notes

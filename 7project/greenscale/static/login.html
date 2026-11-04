@@ -98,7 +98,7 @@
           <button class="submit" id="submit-button" type="submit">Sign in</button>
         </div>
       </form>
-      <p class="demo-note">Your password is stored as a secure hash. Your sign-in session is held in an HttpOnly cookie.</p>
+      <p class="demo-note">Your password is stored as a secure hash. Signing in creates an HttpOnly session cookie.</p>
     </section>
   </main>
   <script>
@@ -113,7 +113,12 @@
     const subtitle = document.getElementById('form-subtitle');
     const submitButton = document.getElementById('submit-button');
     const message = document.getElementById('form-message');
+    const registrationComplete = new URLSearchParams(window.location.search).get('registered') === '1';
     let mode = 'login';
+    if (registrationComplete) {
+      message.className = 'message success';
+      message.textContent = 'Registration successful. Sign in with your new account.';
+    }
 
     function setMode(nextMode) {
       mode = nextMode;
@@ -175,7 +180,21 @@
           return;
         }
         message.className = 'message success';
-        message.textContent = registering ? 'Account created. Opening your planner…' : 'Signed in. Opening your planner…';
+        if (registering) {
+          message.textContent = 'Registration successful. Redirecting to sign in…';
+          passwordInput.value = '';
+          confirmInput.value = '';
+          submitButton.disabled = true;
+          try {
+            await fetch('/auth/logout', {method: 'POST', credentials: 'same-origin'});
+          } catch (logoutError) {
+            // The registration endpoint already revokes any existing session.
+          } finally {
+            window.location.assign('/login?registered=1');
+          }
+          return;
+        }
+        message.textContent = 'Signed in. Opening your planner…';
         window.location.assign('/');
       } catch (error) {
         message.textContent = 'Could not reach GreenScale. Check your connection and try again.';
@@ -185,9 +204,11 @@
       }
     });
 
-    fetch('/auth/me', {credentials: 'same-origin'}).then(response => {
-      if (response.ok) window.location.replace('/');
-    }).catch(() => {});
+    if (!registrationComplete) {
+      fetch('/auth/me', {credentials: 'same-origin'}).then(response => {
+        if (response.ok) window.location.replace('/');
+      }).catch(() => {});
+    }
   </script>
 </body>
 </html>
