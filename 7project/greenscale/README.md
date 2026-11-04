@@ -49,6 +49,7 @@ python -m uvicorn app.main:app --reload
 Windows PowerShell is the same after `Activate.ps1`.
 
 - Health: http://127.0.0.1:8000/health
+- Sign in / register: http://127.0.0.1:8000/login
 - Docs: http://127.0.0.1:8000/docs
 
 ## Tests
@@ -60,6 +61,17 @@ pytest
 ```
 
 Windows: `.\.venv\Scripts\Activate.ps1` then `pytest`.
+
+## Accounts and login
+
+GreenScale provides email/password registration and sign-in at `/login`. Passwords
+are stored as PBKDF2 hashes, and successful sign-in creates a seven-day HttpOnly
+session cookie. Job API endpoints require a session and each account sees only its
+own jobs. Sign out from the dashboard sidebar.
+
+For an existing PostgreSQL database, apply `migrations/002_add_user_auth.sql`
+before deploying the authentication-enabled API. Existing jobs keep their rows
+but remain unassigned to an account; new jobs are linked to the signed-in account.
 
 ## Price adapter (`app/prices.py`)
 

@@ -32,7 +32,7 @@ Do not store database passwords, access tokens, or service account keys in Git.
 | Region | `europe-north1` |
 | Zone | `europe-north1-a` |
 | Namespace | `greenscale` |
-| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1` |
+| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1` |
 | API Service | `greenscale-api-service` |
 | PostgreSQL Service | `greenscale-postgres` |
 
@@ -94,9 +94,9 @@ Credential creation and database deployment are covered in the following deploym
 
 ### D. Docker image
 
-The current API image is:
+The current API manifest uses:
 
-`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1`
+`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1`
 
 Kubernetes pulls this image from Google Artifact Registry in europe-north1.
 
@@ -447,21 +447,10 @@ Stop port forwarding using `Ctrl+C` when finished.
 
 ### F. Verify the database connection
 
-With port forwarding active, run:
-
-```bash
-curl --fail --show-error http://localhost:8000/jobs
-```
-
-A newly deployed database may return an empty list:
-
-```json
-[]
-```
-
-A populated database may return existing job records.
-
-A successful response demonstrates that the API can serve the `/jobs` endpoint. If it returns a database-related error, inspect the API logs and database configuration.
+With port forwarding active, open `http://localhost:8000/login`, create an
+account, and sign in. The dashboard loads jobs associated with that account.
+Existing jobs created before account support remain unassigned and are not shown.
+If the dashboard cannot load jobs, inspect the API logs and database configuration.
 
 ### G. Verify the deployed image
 
@@ -473,7 +462,7 @@ kubectl get deployment greenscale-api -n greenscale \
 Expected image for the current deployment:
 
 ```text
-europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:llm-fix-v1
+europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-v1
 ```
 
 ### H. Important deployment notes
@@ -486,50 +475,32 @@ europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api
 - The automatic Kubernetes Job executor requires separate integration verification.
 - A new PostgreSQL installation must have its database schema initialized through the project's supported startup or migration mechanism before job endpoints can work reliably.
 
-## 3.6. Database Table Initialization
+## 3.6. Database schema and authentication
 
-GreenScale uses SQLAlchemy to initialize database tables when FastAPI starts.
+On startup, SQLAlchemy creates missing tables. It does not add columns to
+existing tables. Before deploying the authentication-enabled API to the existing
+PostgreSQL database, apply the idempotent migration from the project root in
+Cloud Shell:
 
-The initialization code is located in `app/main.py`:
-
-```python
-async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+```bash
+kubectl exec -i -n greenscale deployment/greenscale-postgres -- \
+  psql -U greenscale -d greenscale < migrations/002_add_user_auth.sql
 ```
 
-### How initialization works
+The migration creates `users` and `user_sessions`, then adds nullable
+`jobs.user_id`. Existing job rows are preserved and remain unassigned; new jobs
+belong to the signed-in account. The migration can be rerun safely.
 
-1. The PostgreSQL Deployment starts and becomes available.
-2. FastAPI starts and connects to PostgreSQL using `DATABASE_URL`.
-3. SQLAlchemy checks the table definitions registered in `Base.metadata`.
-4. Missing tables are created automatically.
-5. Existing tables are preserved.
-
-No separate manual SQL table-creation command is required for the current schema during a fresh deployment.
-
-### Verify database initialization
-
-After deploying FastAPI, check its logs:
+After deployment, check the API logs:
 
 ```bash
 kubectl logs deployment/greenscale-api -n greenscale --tail=50
 ```
 
-Test the jobs endpoint through port forwarding:
-
-```bash
-curl --fail --show-error http://localhost:8000/jobs
-```
-
-An HTTP 200 response confirms that the endpoint successfully handled the request. The endpoint should be tested with PostgreSQL available.
-
-### Important limitation
-
-`Base.metadata.create_all()` creates missing tables but does not migrate existing database schemas.
-
-If a future GreenScale version introduces new columns or modifies existing columns, a proper database migration must be performed.
-
-Never delete the existing database or PersistentVolumeClaim simply to apply schema changes.
+Open `http://localhost:8000/login` through the active port-forward to create an
+account and sign in. Job API requests require the session cookie, and users only
+see jobs assigned to their own account. Never delete the database or its PVC to
+apply this schema change.
 
 
 ## 4. Kubernetes Infrastructure
