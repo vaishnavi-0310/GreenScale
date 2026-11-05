@@ -8,8 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.db import get_db
-from app.models import Job, JobStatus
+from app.models import Job, JobStatus, User
 from app.schemas import JobRead
 
 logger = logging.getLogger("greenscale")
@@ -49,10 +50,15 @@ def _text(value: datetime | None) -> str:
 
 
 @router.patch("/{job_id}/schedule", response_model=JobRead)
-def reschedule_job(job_id: int, payload: RescheduleRequest, db: Session = Depends(get_db)):
+def reschedule_job(
+    job_id: int,
+    payload: RescheduleRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     # Lock the row so the dispatcher cannot claim the job while we change it.
     job = db.execute(
-        select(Job).where(Job.id == job_id).with_for_update()
+        select(Job).where(Job.id == job_id, Job.user_id == user.id).with_for_update()
     ).scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
