@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.db import get_db
 from app.llm import LLMError, LLMUnavailableError, extract_job
-from app.models import Job, JobStatus
+from app.models import Job, JobStatus, User
 from app.plan_pending import plan_pending_job
 from app.prices import fetch_day
 from app.schemas import JobCreate, JobRead, TextJobRequest
@@ -21,8 +22,12 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
-def create_job(payload: JobCreate, db: Session = Depends(get_db)):
-    job = Job(**payload.model_dump())
+def create_job(
+    payload: JobCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    job = Job(**payload.model_dump(), user_id=user.id)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -42,6 +47,7 @@ def create_job_from_text(
     payload: TextJobRequest,
     db: Session = Depends(get_db),
     extractor=Depends(get_extractor),
+    user: User = Depends(get_current_user),
 ):
     try:
         job_data = extractor(payload.text)
@@ -61,7 +67,7 @@ def create_job_from_text(
             detail=f"Could not turn the description into a valid job: {e}",
         )
 
-    job = Job(**job_data.model_dump())
+    job = Job(**job_data.model_dump(), user_id=user.id)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -73,9 +79,13 @@ def create_job_from_text(
 
 
 @router.post("/{job_id}/plan", response_model=JobRead)
-def plan_job(job_id: int, db: Session = Depends(get_db)):
+def plan_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Estimate runtime and choose a feasible slot using current NO2 prices."""
-    job = db.get(Job, job_id)
+    job = db.scalar(select(Job).where(Job.id == job_id, Job.user_id == user.id))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.PENDING:
@@ -112,16 +122,21 @@ def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    stmt = select(Job).order_by(Job.created_at.desc(), Job.id.desc())
+    stmt = select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc(), Job.id.desc())
     if status_filter is not None:
         stmt = stmt.where(Job.status == status_filter)
     return db.scalars(stmt.limit(limit).offset(offset)).all()
 
 
 @router.get("/{job_id}", response_model=JobRead)
-def get_job(job_id: int, db: Session = Depends(get_db)):
-    job = db.get(Job, job_id)
+def get_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    job = db.scalar(select(Job).where(Job.id == job_id, Job.user_id == user.id))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job

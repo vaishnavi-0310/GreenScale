@@ -32,7 +32,18 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    client = TestClient(app)
+    registration = client.post(
+        "/auth/register",
+        json={"name": "CI User", "email": "ci@example.com", "password": "test-password-123"},
+    )
+    assert registration.status_code == 201
+    login = client.post(
+        "/auth/login",
+        json={"email": "ci@example.com", "password": "test-password-123"},
+    )
+    assert login.status_code == 200
+    yield client
     app.dependency_overrides.clear()
 
 
