@@ -491,6 +491,17 @@ The migration creates `users` and `user_sessions`, then adds nullable
 `jobs.user_id`. Existing job rows are preserved and remain unassigned; new jobs
 belong to the signed-in account. The migration can be rerun safely.
 
+For the stored Gemini response shown in job details, apply migration 003 after
+syncing the updated project files:
+
+```bash
+kubectl exec -i -n greenscale deployment/greenscale-postgres -- \
+  psql -U greenscale -d greenscale < migrations/003_add_llm_response.sql
+```
+
+This adds nullable `jobs.llm_response`; existing rows remain valid and show no
+Gemini response. The migration can be rerun safely.
+
 After deployment, check the API logs:
 
 ```bash

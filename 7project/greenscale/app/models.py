@@ -53,6 +53,7 @@ class Job(Base):
     # What the user asked for
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, default=None)  # original text (used in Step 5)
+    llm_response: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     workload_type: Mapped[str | None] = mapped_column(
         String(40), nullable=True
     )

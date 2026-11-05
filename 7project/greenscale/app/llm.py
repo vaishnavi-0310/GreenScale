@@ -137,7 +137,9 @@ def parse_extracted(raw: str, original_text: str) -> JobCreate:
         raise LLMError(f"LLM returned invalid job data ({e.error_count()} problem(s))") from e
 
 
-def extract_job(text: str, now: datetime | None = None, client=None) -> JobCreate:
+def extract_job_with_response(
+    text: str, now: datetime | None = None, client=None
+) -> tuple[JobCreate, str]:
     text = text.strip()
     if not text:
         raise LLMError("Job description is empty")
@@ -154,7 +156,13 @@ def extract_job(text: str, now: datetime | None = None, client=None) -> JobCreat
     )
 
     raw = _generate_with_retry(client, contents, config)
-    return parse_extracted(raw, original_text=text)
+    return parse_extracted(raw, original_text=text), raw
+
+
+def extract_job(text: str, now: datetime | None = None, client=None) -> JobCreate:
+    """Compatibility helper returning only the parsed job metadata."""
+    job, _ = extract_job_with_response(text, now=now, client=client)
+    return job
 
 
 def decide_price(price_nok_per_kwh: float, client=None) -> PriceDecision:
