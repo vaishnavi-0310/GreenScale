@@ -13,6 +13,7 @@ from app.db import Base, engine
 from app.health import router as health_router
 from app.logging_config import setup_logging
 from app.routes import router as jobs_router
+from app.reschedule import router as reschedule_router
 
 setup_logging(settings.log_level)
 logger = logging.getLogger("greenscale")
@@ -67,6 +68,7 @@ async def log_requests(request: Request, call_next):
 
 
 app.include_router(jobs_router)
+app.include_router(reschedule_router)
 app.include_router(health_router)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
