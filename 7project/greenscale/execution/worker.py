@@ -50,40 +50,111 @@ def run_factorial(input_size_mb: int) -> None:
     print(json.dumps({"workload": "factorial", "n": n, "result_bits": value.bit_length()}), flush=True)
 
 
+
 def run_csv_summary(uri: str, max_size_mb: int) -> None:
+    """Generate a generic CSV summary from Google Cloud Storage."""
+    from decimal import Decimal, InvalidOperation
+
     if not 1 <= max_size_mb <= MAX_CSV_MB:
-        raise ValueError(f"CSV size limit must be between 1 and {MAX_CSV_MB} MB")
+        raise ValueError("Invalid CSV size limit")
+
     bucket_name, object_name = parse_gcs_uri(uri)
 
     from google.api_core.exceptions import NotFound
     from google.cloud import storage
 
     blob = storage.Client().bucket(bucket_name).blob(object_name)
+
     try:
         blob.reload()
     except NotFound as exc:
-        raise ValueError("CSV object was not found in Cloud Storage") from exc
+        raise ValueError("CSV object not found") from exc
 
-    if blob.size is not None and blob.size > max_size_mb * 1024 * 1024:
-        raise ValueError(f"CSV object is larger than the declared {max_size_mb} MB limit")
+    if blob.size is None:
+        raise ValueError("CSV object size is unknown")
+
+    if blob.size > max_size_mb * 1024 * 1024:
+        raise ValueError("CSV exceeds size limit")
+
+    row_count = 0
+    missing_values = 0
+    duplicate_rows = 0
+    seen_rows = set()
 
     with blob.open("rb") as binary_stream:
-        text_stream = io.TextIOWrapper(binary_stream, encoding="utf-8-sig", newline="")
-        rows = csv.reader(text_stream, strict=True)
-        try:
-            header = next(rows)
-        except StopIteration:
-            header = []
-            row_count = 0
-        else:
-            row_count = sum(1 for _ in rows)
+        text_stream = io.TextIOWrapper(
+            binary_stream,
+            encoding="utf-8-sig",
+            newline=""
+        )
+        reader = csv.reader(text_stream, strict=True)
+        header = next(reader, [])
 
-    print(json.dumps({
+        if not header or any(not name.strip() for name in header):
+            raise ValueError("CSV must have valid column names")
+
+        if len(set(header)) != len(header):
+            raise ValueError("Duplicate column names")
+
+        column_count = len(header)
+        missing_by_column = {name: 0 for name in header}
+        numeric_columns = {name: True for name in header}
+        nonempty_counts = {name: 0 for name in header}
+
+        for row in reader:
+            if len(row) != column_count:
+                raise ValueError("Inconsistent CSV row length")
+
+            row_count += 1
+
+            row_key = tuple(row)
+
+            if row_key in seen_rows:
+                duplicate_rows += 1
+
+            seen_rows.add(row_key)
+
+            for name, value in zip(header, row):
+                value = value.strip()
+
+                if value == "":
+                    missing_values += 1
+                    missing_by_column[name] += 1
+                    continue
+
+                nonempty_counts[name] += 1
+
+                try:
+                    number = Decimal(value)
+                    if not number.is_finite():
+                        numeric_columns[name] = False
+                except InvalidOperation:
+                    numeric_columns[name] = False
+
+    data_types = {}
+
+    for name in header:
+        if nonempty_counts[name] == 0:
+            data_types[name] = "unknown"
+        elif numeric_columns[name]:
+            data_types[name] = "numeric"
+        else:
+            data_types[name] = "text"
+
+    result = {
         "workload": "csv_summary",
+        "file": uri,
         "rows": row_count,
-        "columns": len(header),
+        "columns": column_count,
         "column_names": header,
-    }), flush=True)
+        "missing_values": missing_values,
+        "missing_by_column": missing_by_column,
+        "duplicate_rows": duplicate_rows,
+        "data_types": data_types,
+        "status": "SUCCESS",
+    }
+
+    print(json.dumps(result, indent=2), flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
