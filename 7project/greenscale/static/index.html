@@ -217,6 +217,24 @@ button {
 .table-wrap {
   overflow: auto
 }
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px
+}
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px
+}
+.pagination button:disabled {
+  cursor: not-allowed;
+  opacity: .5
+}
 table {
   border-collapse: collapse;
   width: 100%;
@@ -499,6 +517,10 @@ select,.secondary {
 }
 }
 @media(max-width:540px) {
+  .pagination {
+    align-items: flex-start;
+    flex-direction: column
+  }
   .top {
     align-items: flex-start;
     gap: 12px;
@@ -616,7 +638,7 @@ select,.secondary {
               All jobs
             </h2>
             <div class="filters">
-              <select id="status-filter" onchange="loadJobs()">
+              <select id="status-filter" onchange="loadJobs(true)">
                 <option value="">
                   All statuses
                 </option>
@@ -642,6 +664,8 @@ select,.secondary {
             </div>
           </div>
           <div class="table-wrap" id="jobs-table">
+          </div>
+          <div class="pagination" id="jobs-pagination" aria-label="Job list pagination">
           </div>
         </div>
       </section>
@@ -728,6 +752,10 @@ select,.secondary {
   </div>
   <script>
 let jobs=[];
+let overviewJobs=[];
+let jobPage=0;
+let jobTotal=0;
+const JOB_PAGE_SIZE=10;
 let mode='text';
 let lastPlanIssue=null;
 const titles={
@@ -763,8 +791,26 @@ function fmt(v){
   return isNaN(d)?esc(v):d.toLocaleString([],
     {
     dateStyle:'medium',
-    timeStyle:'short'
+    timeStyle:'short',
+    timeZone:'Europe/Oslo'
   })
+}
+function formatOsloDeadline(value){
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return value;
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Europe/Oslo',
+    year:'numeric',
+    month:'2-digit',
+    day:'2-digit',
+    hour:'2-digit',
+    minute:'2-digit',
+    second:'2-digit',
+    hourCycle:'h23',
+    timeZoneName:'longOffset'
+  }).formatToParts(date).map(part=>[part.type,part.value]));
+  const offset=(parts.timeZoneName||'GMT').replace(/^GMT/,'');
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${offset} (Europe/Oslo)`
 }
 function recordedDuration(j){
   if(!j.started_at||!j.finished_at)return '—';
@@ -783,29 +829,55 @@ function table(items){
   if(!items.length)return '<div class="empty">No jobs yet. Submit your first job to get started.</div>';
   return `<table><thead><tr><th>Job</th><th>Status</th><th>Priority</th><th>Deadline</th><th>Planned start</th><th>Estimated</th><th>Recorded elapsed</th></tr></thead><tbody>${items.map(j=>`<tr onclick="openDetail(${Number(j.id)})" style="cursor:pointer"><td><div class="jobid">${esc(j.name||`Job #${j.id}`)}</div><div class="work">#${esc(j.id)} · ${esc(j.workload_type||'Workload')}</div></td><td>${statusPill(j.status)}</td><td>${esc(j.priority)}</td><td>${fmt(j.deadline)}</td><td>${fmt(j.scheduled_for)}</td><td>${j.estimated_minutes?`${esc(j.estimated_minutes)} min`:'—'}</td><td>${recordedDuration(j)}</td></tr>`).join('')}</tbody></table>`
 }
-async function loadJobs(){
+async function loadJobs(resetPage=false){
   try{
-    let s=document.getElementById('status-filter')?.value||'';
-    let r=await fetch('/jobs'+(s?'?status='+encodeURIComponent(s):''));
-    if(!r.ok)throw Error(`API returned ${r.status}`);
-    jobs=await r.json();
+    if(resetPage)jobPage=0;
+    const statusFilter=document.getElementById('status-filter')?.value||'';
+    const params=new URLSearchParams({
+      limit:String(JOB_PAGE_SIZE),
+      offset:String(jobPage*JOB_PAGE_SIZE)
+    });
+    if(statusFilter)params.set('status',statusFilter);
+    const [pageResponse,overviewResponse]=await Promise.all([
+      fetch(`/jobs?${params.toString()}`),
+      fetch('/jobs?limit=50&offset=0')
+    ]);
+    if(pageResponse.status===401||overviewResponse.status===401){
+      window.location.replace('/login');
+      return
+    }
+    if(!pageResponse.ok)throw Error(`API returned ${pageResponse.status}`);
+    if(!overviewResponse.ok)throw Error(`Overview API returned ${overviewResponse.status}`);
+    jobs=await pageResponse.json();
+    jobTotal=Number(pageResponse.headers.get('X-Total-Count')||jobs.length);
+    overviewJobs=await overviewResponse.json();
     renderOverview();
     renderJobs()
   }
   catch(e){
-    if(e.message==='API returned 401'){
-      window.location.replace('/login');
-      return
-    }
     document.getElementById('jobs-table').innerHTML=`<div class="empty">Could not load jobs: ${esc(e.message)} <button class="secondary" onclick="loadJobs()">Retry</button></div>`;
+    document.getElementById('jobs-pagination').innerHTML='';
     document.getElementById('recent-table').innerHTML='<div class="empty">Job data unavailable.</div>'
   }
 }
+function changeJobPage(direction){
+  const pageCount=Math.ceil(jobTotal/JOB_PAGE_SIZE);
+  const nextPage=jobPage+direction;
+  if(nextPage<0||nextPage>=pageCount)return;
+  jobPage=nextPage;
+  loadJobs()
+}
 function renderJobs(){
-  let list=jobs;
-  let f=document.getElementById('status-filter')?.value;
-  if(f)list=jobs.filter(j=>j.status===f);
-  document.getElementById('jobs-table').innerHTML=table(list)
+  document.getElementById('jobs-table').innerHTML=table(jobs);
+  const pagination=document.getElementById('jobs-pagination');
+  if(jobTotal===0){
+    pagination.innerHTML='';
+    return
+  }
+  const pageCount=Math.ceil(jobTotal/JOB_PAGE_SIZE);
+  const first=jobPage*JOB_PAGE_SIZE+1;
+  const last=Math.min(first+jobs.length-1,jobTotal);
+  pagination.innerHTML=`<span>Showing ${first}–${last} of ${jobTotal} jobs</span><div class="pagination-controls"><button class="secondary" onclick="changeJobPage(-1)" ${jobPage===0?'disabled':''}>Previous</button><span>Page ${jobPage+1} of ${pageCount}</span><button class="secondary" onclick="changeJobPage(1)" ${jobPage+1>=pageCount?'disabled':''}>Next</button></div>`
 }
 function renderOverview(){
   let counts={
@@ -815,18 +887,18 @@ function renderOverview(){
     succeeded:0,
     failed:0
   };
-  jobs.forEach(j=>{
+  overviewJobs.forEach(j=>{
     let k=String(j.status).toLowerCase();if(k in counts)counts[k]++
   });
   document.getElementById('stats').innerHTML=Object.entries(counts).slice(0,
   4).map(([k,v])=>`<div class="card"><div class="stat-label">${esc(k[0].toUpperCase()+k.slice(1))} jobs</div><div class="stat">${v}</div></div>`).join('');
-  let upcoming=jobs.filter(j=>j.scheduled_for).sort((a,
+  let upcoming=overviewJobs.filter(j=>j.scheduled_for).sort((a,
   b)=>new Date(a.scheduled_for)-new Date(b.scheduled_for))[0];
   document.getElementById('next-job').innerHTML=upcoming?`<div class="datebox"><small>Planned</small>${new Date(upcoming.scheduled_for).toLocaleDateString([], {
     month:'short',
     day:'numeric'
   })}</div><div><strong>${esc(upcoming.name||`Job #${upcoming.id}`)}</strong><div class="hint">${fmt(upcoming.scheduled_for)} · ${esc(upcoming.estimated_minutes||'—')} min · ${statusPill(upcoming.status)}</div></div>`:'<span class="hint">No scheduled jobs yet. Submitted jobs appear here when a planning time is available.</span>';
-  document.getElementById('recent-table').innerHTML=table(jobs.slice(0,
+  document.getElementById('recent-table').innerHTML=table(overviewJobs.slice(0,
   5))
 }
 document.querySelectorAll('.nav button[data-page]').forEach(b=>b.onclick=()=>showPage(b.dataset.page));
@@ -874,7 +946,7 @@ document.getElementById('job-form').addEventListener('submit',async e=>{
     catch(planError){
       lastPlanIssue=`Job saved, but planning could not be reached: ${planError.message}`
     }
-    await loadJobs();openDetail(data.id)
+    await loadJobs(true);openDetail(data.id)
   }
   catch(e){
     err.textContent=typeof e.message==='string'?e.message:'Could not submit job.'
@@ -1018,13 +1090,15 @@ async function openDetail(id){
   if(j.llm_response){
     let pretty=j.llm_response;
     try{
-      pretty=JSON.stringify(JSON.parse(j.llm_response),
-      null,
-      2)
+      const response=JSON.parse(j.llm_response);
+      if(typeof response.deadline==='string'){
+        response.deadline=formatOsloDeadline(response.deadline)
+      }
+      pretty=JSON.stringify(response,null,2)
     }
     catch{
     }
-    llmOutput=`<section class="llm-output"><h3>Gemini response</h3><pre>${esc(pretty)}</pre></section>`
+    llmOutput=`<section class="llm-output"><h3>Gemini response (deadline shown in Europe/Oslo)</h3><pre>${esc(pretty)}</pre></section>`
   }
   document.getElementById('detail-content').innerHTML=`<div class="panel"><div class="panel-head"><div><div class="eyebrow">Job #${esc(j.id)}</div><h2>${esc(j.name||'Untitled job')}</h2></div>${statusPill(j.status)}</div><div class="detail-grid">${[['Workload',j.workload_type],['Priority',j.priority],['Input size',j.input_size_mb?`${j.input_size_mb} MB`:'—'],['Estimated duration (rounded)',j.estimated_minutes?`${j.estimated_minutes} minutes`:'—'],['Recorded elapsed (start to finish)',recordedDuration(j)],['Deadline',fmt(j.deadline)],['Planned start',fmt(j.scheduled_for)],['Created',fmt(j.created_at)],['Kubernetes job',j.k8s_job_name]].map(([a,b])=>`<div class="detail-item"><small>${a}</small><strong>${esc(b)}</strong></div>`).join('')}</div>${j.description?`<div class="notice">${esc(j.description)}</div>`:''}${llmOutput}${j.decision_reason?`<div class="notice"><strong>Scheduling reason</strong><br>${esc(j.decision_reason)}</div>`:''}<div class="notice">NO2 prices are fetched for planning and are not stored as price history or measured cloud electricity cost.</div><div class="notice">Recorded elapsed time comes from stored start and finish timestamps and can include dispatcher status-update delay. It is not exact worker CPU time.</div>${reschedulePanel(j)}<div class="workflow"><h2>Processing flow</h2>${flowMarkup(j)}${lastPlanIssue?`<div class="error">${esc(lastPlanIssue)}</div>`:''}</div></div>`
 }

@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -127,15 +127,20 @@ def plan_job(
 
 @router.get("", response_model=list[JobRead])
 def list_jobs(
+    response: Response,
     status_filter: JobStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc(), Job.id.desc())
+    filters = [Job.user_id == user.id]
     if status_filter is not None:
-        stmt = stmt.where(Job.status == status_filter)
+        filters.append(Job.status == status_filter)
+
+    total = db.scalar(select(func.count()).select_from(Job).where(*filters)) or 0
+    response.headers["X-Total-Count"] = str(total)
+    stmt = select(Job).where(*filters).order_by(Job.created_at.desc(), Job.id.desc())
     return db.scalars(stmt.limit(limit).offset(offset)).all()
 
 
