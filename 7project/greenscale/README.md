@@ -161,18 +161,27 @@ Supported worker commands are allowlisted in `execution/worker.py`:
 - `sleep`: sleeps for the job's planned runtime (`estimated_minutes`).
 - `factorial`: computes a bounded factorial, scaling the input from `input_size_mb`.
 - `csv_summary`: streams a CSV from a `gs://bucket/object` URI included in the
-description. The declared input size is capped at 500 MB. The GKE workload
-identity for `greenscale-executor` needs read-only access to the source bucket.
-For GKE Workload Identity, link that Kubernetes service account to a Google
-service account and grant `roles/storage.objectViewer` on the input bucket only.
-The cluster must have Workload Identity Federation enabled.
+description. The job form can upload CSV files up to 20 MiB to the configured
+GCS bucket and include the returned URI in the request. Direct GCS inputs can be
+up to 500 MiB. The GKE workload identity for `greenscale-executor` needs
+read-only access to the source bucket. The API identity needs permission to
+upload objects. The cluster must have Workload Identity Federation enabled.
+
+When a CSV summary job succeeds, its detail page offers **View results**. The
+API reads the summary from the worker Pod logs; results are not stored in the
+database and stop being available when Kubernetes deletes the Pod (the Job TTL
+is one hour). `k8s/executor-rbac.yaml` grants the API service account permission
+to list worker Pods and read their logs.
 
 Build and publish the image tag referenced by the Kubernetes manifests, then apply
-the manifests to the `greenscale` namespace:
+the manifests to the `greenscale` namespace. The API, dispatcher, and worker now
+use the same image tag so the UI endpoints and result worker are deployed together:
 
 ```bash
 # Run from the greenscale project directory.
 # Prerequisites: namespace, database, Secrets, and API ServiceAccount.
+gcloud builds submit --tag \
+  europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:csv-ui-v1
 
 kubectl apply -f k8s/executor-rbac.yaml
 kubectl apply -f k8s/api-deployment.yaml
@@ -185,5 +194,5 @@ kubectl get deployments,cronjobs -n greenscale
 
 Check the dispatcher and workload Jobs with `kubectl get jobs -n greenscale`. A
 workload job is named `gs-<GreenScale job id>`; inspect its output with
-`kubectl logs job/gs-<id> -n greenscale`. CSV jobs need an accessible Cloud
-Storage object URI; the UI does not upload files.
+`kubectl logs job/gs-<id> -n greenscale`. CSV uploads use the authenticated
+`POST /jobs/upload-csv` endpoint before GreenScale submits the job for planning.

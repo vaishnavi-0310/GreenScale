@@ -685,11 +685,16 @@ select,.secondary {
                 <label for="description-text">
                   Describe the job
                 </label>
-                <textarea id="description-text" maxlength="2000" placeholder="Sleep for 1 minute, or summarize gs://your-bucket/input.csv (20 MB).">
+                <textarea id="description-text" maxlength="2000" placeholder="Sleep for 1 minute, or summarize a CSV file.">
                 </textarea>
                 <div class="hint">
-                  CSV summaries need a readable gs://bucket/object URI; this form does not upload files.
+                  Describe the workload here, or choose a CSV file below. CSV files are uploaded to private Google Cloud Storage.
                 </div>
+              </div>
+              <div class="field full">
+                <label for="csv-file">CSV file (optional)</label>
+                <input id="csv-file" name="file" type="file" accept=".csv,text/csv">
+                <div class="hint">Maximum file size: 20 MiB. The first row must contain column names.</div>
               </div>
               <div class="field">
                 <label for="deadline-date">
@@ -914,33 +919,49 @@ document.getElementById('sign-out').addEventListener('click',async()=>{
     window.location.assign('/login')
   }
 });
+async function readApiResponse(response){
+  const raw=await response.text();
+  let data={};
+  try{data=raw?JSON.parse(raw):{};}
+  catch{throw Error(`Server returned a non-JSON response (${response.status}): ${raw.slice(0,180)||'empty response'}`);}
+  if(!response.ok){
+    const detail=Array.isArray(data.detail)?data.detail.map(x=>x.msg||JSON.stringify(x)).join(', '):data.detail;
+    throw Error(detail||`Request failed (${response.status})`);
+  }
+  return data;
+}
 document.getElementById('job-form').addEventListener('submit',async e=>{
   e.preventDefault();let err=document.getElementById('submit-error'),
   progress=document.getElementById('submit-progress'),
-  btn=document.getElementById('submit-button');err.textContent='';progress.hidden=true;btn.disabled=true;btn.textContent='Extracting…';try{
-    let description=document.getElementById('description-text').value.trim();if(!description)throw Error('Describe the job first.');const deadlineDate=document.getElementById('deadline-date').value,
-    deadlineTime=document.getElementById('deadline-time').value;if(!deadlineDate||!deadlineTime)throw Error('Choose a deadline date and time.');const priority=document.querySelector('input[name=priority]:checked').value;const priorityText=priority;let body={
-      text:`${description}\nDeadline: ${deadlineDate} at ${deadlineTime}, Europe/Oslo time. Priority: ${priorityText}.`
-    };progress.textContent='Sending your job details to Gemini…';progress.hidden=false;let r=await fetch('/jobs/from-text',
+  btn=document.getElementById('submit-button');err.textContent='';progress.hidden=true;btn.disabled=true;btn.textContent='Create job';try{
+    let description=document.getElementById('description-text').value.trim();
+    const csvFile=document.getElementById('csv-file').files[0];
+    if(!description&&!csvFile)throw Error('Describe the job or choose a CSV file.');
+    if(csvFile&&description.length>1700)throw Error('Shorten the description to 1700 characters before attaching a CSV file.');
+    const deadlineDate=document.getElementById('deadline-date').value,
+    deadlineTime=document.getElementById('deadline-time').value;
+    if(!deadlineDate||!deadlineTime)throw Error('Choose a deadline date and time.');
+    const priority=document.querySelector('input[name=priority]:checked').value;
+    if(csvFile){
+      progress.textContent='Uploading your CSV to Google Cloud Storage…';progress.hidden=false;btn.textContent='Uploading…';
+      const form=new FormData();form.append('file',csvFile);
+      const uploaded=await readApiResponse(await fetch('/jobs/upload-csv',{method:'POST',body:form,credentials:'same-origin'}));
+      const task=description||'Summarize this CSV file';
+      description=`${task}\nCSV file: ${uploaded.gcs_uri} (${uploaded.size_mb} MB).`;
+    }
+    const body={text:`${description}\nDeadline: ${deadlineDate} at ${deadlineTime}, Europe/Oslo time. Priority: ${priority}.`};
+    progress.textContent='Sending your job details to Gemini…';progress.hidden=false;btn.textContent='Extracting…';
+    let data=await readApiResponse(await fetch('/jobs/from-text',
       {
       method:'POST',
-      headers:{
-        'Content-Type':'application/json'
-      },
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
       body:JSON.stringify(body)
-    });let rawResponse=await r.text(),
-    data={
-    };try{
-      data=rawResponse?JSON.parse(rawResponse):{
-      }
-    }
-    catch{
-      throw Error(`Server returned a non-JSON response (${r.status}): ${rawResponse.slice(0,180)||'empty response'}`)
-    }
-    if(!r.ok)throw Error(data.detail?.[0]?.msg||data.detail||`Request failed (${r.status})`);progress.textContent=`Job #${data.id} saved. Estimating runtime and checking NO2 prices for a schedule…`;btn.textContent='Planning…';lastPlanIssue=null;try{
+    }));
+    progress.textContent=`Job #${data.id} saved. Estimating runtime and checking NO2 prices for a schedule…`;btn.textContent='Planning…';lastPlanIssue=null;try{
       let planned=await fetch(`/jobs/${data.id}/plan`,
         {
-        method:'POST'
+        method:'POST',credentials:'same-origin'
       });let result=await planned.json();if(planned.ok)data=result;else lastPlanIssue=result.detail||`Planning failed (${planned.status})`
     }
     catch(planError){
@@ -1100,7 +1121,27 @@ async function openDetail(id){
     }
     llmOutput=`<section class="llm-output"><h3>Gemini response (deadline shown in Europe/Oslo)</h3><pre>${esc(pretty)}</pre></section>`
   }
-  document.getElementById('detail-content').innerHTML=`<div class="panel"><div class="panel-head"><div><div class="eyebrow">Job #${esc(j.id)}</div><h2>${esc(j.name||'Untitled job')}</h2></div>${statusPill(j.status)}</div><div class="detail-grid">${[['Workload',j.workload_type],['Priority',j.priority],['Input size',j.input_size_mb?`${j.input_size_mb} MB`:'—'],['Estimated duration (rounded)',j.estimated_minutes?`${j.estimated_minutes} minutes`:'—'],['Recorded elapsed (start to finish)',recordedDuration(j)],['Deadline',fmt(j.deadline)],['Planned start',fmt(j.scheduled_for)],['Created',fmt(j.created_at)],['Kubernetes job',j.k8s_job_name]].map(([a,b])=>`<div class="detail-item"><small>${a}</small><strong>${esc(b)}</strong></div>`).join('')}</div>${j.description?`<div class="notice">${esc(j.description)}</div>`:''}${llmOutput}${j.decision_reason?`<div class="notice"><strong>Scheduling reason</strong><br>${esc(j.decision_reason)}</div>`:''}<div class="notice">NO2 prices are fetched for planning and are not stored as price history or measured cloud electricity cost.</div><div class="notice">Recorded elapsed time comes from stored start and finish timestamps and can include dispatcher status-update delay. It is not exact worker CPU time.</div>${reschedulePanel(j)}<div class="workflow"><h2>Processing flow</h2>${flowMarkup(j)}${lastPlanIssue?`<div class="error">${esc(lastPlanIssue)}</div>`:''}</div></div>`
+  const showCsvResults=j.workload_type==='csv_summary'&&String(j.status).toLowerCase()==='succeeded';
+  const csvResults=showCsvResults?`<section class="notice"><div class="panel-head"><h3>CSV summary</h3><button class="secondary" id="view-csv-results" onclick="loadCsvResults(${Number(j.id)})">View results</button></div><div id="csv-results-content" class="hint" aria-live="polite"></div></section>`:'';
+  document.getElementById('detail-content').innerHTML=`<div class="panel"><div class="panel-head"><div><div class="eyebrow">Job #${esc(j.id)}</div><h2>${esc(j.name||'Untitled job')}</h2></div>${statusPill(j.status)}</div><div class="detail-grid">${[['Workload',j.workload_type],['Priority',j.priority],['Input size',j.input_size_mb?`${j.input_size_mb} MB`:'—'],['Estimated duration (rounded)',j.estimated_minutes?`${j.estimated_minutes} minutes`:'—'],['Recorded elapsed (start to finish)',recordedDuration(j)],['Deadline',fmt(j.deadline)],['Planned start',fmt(j.scheduled_for)],['Created',fmt(j.created_at)],['Kubernetes job',j.k8s_job_name]].map(([a,b])=>`<div class="detail-item"><small>${a}</small><strong>${esc(b)}</strong></div>`).join('')}</div>${j.description?`<div class="notice">${esc(j.description)}</div>`:''}${llmOutput}${csvResults}${j.decision_reason?`<div class="notice"><strong>Scheduling reason</strong><br>${esc(j.decision_reason)}</div>`:''}<div class="notice">NO2 prices are fetched for planning and are not stored as price history or measured cloud electricity cost.</div><div class="notice">Recorded elapsed time comes from stored start and finish timestamps and can include dispatcher status-update delay. It is not exact worker CPU time.</div>${reschedulePanel(j)}<div class="workflow"><h2>Processing flow</h2>${flowMarkup(j)}${lastPlanIssue?`<div class="error">${esc(lastPlanIssue)}</div>`:''}</div></div>`
+}
+async function loadCsvResults(jobId){
+  const button=document.getElementById('view-csv-results');
+  const content=document.getElementById('csv-results-content');
+  if(!button||!content)return;
+  button.disabled=true;button.textContent='Loading…';content.className='hint';content.textContent='Retrieving the completed worker summary…';
+  try{
+    const result=await readApiResponse(await fetch(`/jobs/${jobId}/result`,{credentials:'same-origin'}));
+    const names=Array.isArray(result.column_names)?result.column_names:[];
+    const missing=result.missing_by_column&&typeof result.missing_by_column==='object'?result.missing_by_column:{};
+    const types=result.data_types&&typeof result.data_types==='object'?result.data_types:{};
+    const rows=names.map(name=>`<tr><td>${esc(name)}</td><td>${esc(types[name]||'unknown')}</td><td>${esc(missing[name]??0)}</td></tr>`).join('');
+    content.className='';
+    content.innerHTML=`<div class="detail-grid"><div class="detail-item"><small>Data rows</small><strong>${esc(result.rows)}</strong></div><div class="detail-item"><small>Columns</small><strong>${esc(result.columns)}</strong></div><div class="detail-item"><small>Total missing values</small><strong>${esc(result.missing_values)}</strong></div><div class="detail-item"><small>Duplicate rows</small><strong>${esc(result.duplicate_rows)}</strong></div></div><h4>Column summary</h4><div class="table-wrap"><table><thead><tr><th>Column</th><th>Detected type</th><th>Missing values</th></tr></thead><tbody>${rows||'<tr><td colspan="3">No columns found.</td></tr>'}</tbody></table></div>`;
+    button.textContent='Refresh results';
+  }catch(error){
+    content.className='error';content.textContent=error.message||'Could not retrieve the CSV results. The worker Pod logs may have expired.';button.textContent='Try again';
+  }finally{button.disabled=false;}
 }
 const deadlineDate=document.getElementById('deadline-date');
 const osloToday=new Intl.DateTimeFormat('en-CA',{
