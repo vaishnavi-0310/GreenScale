@@ -26,7 +26,7 @@ def run_with_csv(csv_content, capsys):
     storage.Client = MagicMock()
     storage.Client.return_value.bucket.return_value.blob.return_value = blob
 
-    with patch.dict(sys.modules, {"google.cloud.storage": storage}):
+    with patch("google.cloud.storage.Client", return_value=storage.Client.return_value):
         run_csv_summary("gs://test-bucket/data.csv", 1)
 
     return json.loads(capsys.readouterr().out)

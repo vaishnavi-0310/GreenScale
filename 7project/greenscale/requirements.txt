@@ -9,3 +9,4 @@ psycopg[binary]==3.2.13
 google-genai==1.2.0
 kubernetes==31.0.0
 google-cloud-storage>=2.18,<4
+python-multipart==0.0.20
