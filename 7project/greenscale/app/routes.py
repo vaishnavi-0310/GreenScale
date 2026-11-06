@@ -2,13 +2,13 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.db import get_db
-from app.llm import LLMError, LLMUnavailableError, extract_job
+from app.llm import LLMError, LLMUnavailableError, extract_job_with_response
 from app.models import Job, JobStatus, User
 from app.plan_pending import plan_pending_job
 from app.prices import fetch_day
@@ -39,7 +39,7 @@ def create_job(
 
 def get_extractor():
     """Dependency so tests can swap in a fake LLM."""
-    return extract_job
+    return extract_job_with_response
 
 
 @router.post("/from-text", response_model=JobRead, status_code=status.HTTP_201_CREATED)
@@ -50,7 +50,12 @@ def create_job_from_text(
     user: User = Depends(get_current_user),
 ):
     try:
-        job_data = extractor(payload.text)
+        extraction = extractor(payload.text)
+        if isinstance(extraction, tuple):
+            job_data, llm_response = extraction
+        else:
+            # Keep injected/custom extractors that return only JobCreate compatible.
+            job_data, llm_response = extraction, None
     except LLMUnavailableError:
         logger.warning("llm unavailable", extra={"event": "llm_unavailable"})   # in the 503 block
         logger.warning("llm output rejected", extra={"event": "llm_rejected"})  # in the 502 block
@@ -67,7 +72,11 @@ def create_job_from_text(
             detail=f"Could not turn the description into a valid job: {e}",
         )
 
-    job = Job(**job_data.model_dump(), user_id=user.id)
+    job = Job(
+        **job_data.model_dump(),
+        user_id=user.id,
+        llm_response=llm_response,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -118,15 +127,20 @@ def plan_job(
 
 @router.get("", response_model=list[JobRead])
 def list_jobs(
+    response: Response,
     status_filter: JobStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    stmt = select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc(), Job.id.desc())
+    filters = [Job.user_id == user.id]
     if status_filter is not None:
-        stmt = stmt.where(Job.status == status_filter)
+        filters.append(Job.status == status_filter)
+
+    total = db.scalar(select(func.count()).select_from(Job).where(*filters)) or 0
+    response.headers["X-Total-Count"] = str(total)
+    stmt = select(Job).where(*filters).order_by(Job.created_at.desc(), Job.id.desc())
     return db.scalars(stmt.limit(limit).offset(offset)).all()
 
 

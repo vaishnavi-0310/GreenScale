@@ -45,7 +45,18 @@ def env():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app), Session
+    client = TestClient(app)
+    registration = client.post(
+        "/auth/register",
+        json={"name": "CI User", "email": "ci@example.com", "password": "test-password-123"},
+    )
+    assert registration.status_code == 201
+    login = client.post(
+        "/auth/login",
+        json={"email": "ci@example.com", "password": "test-password-123"},
+    )
+    assert login.status_code == 200
+    yield client, Session
     app.dependency_overrides.clear()
     engine.dispose()
 
@@ -54,6 +65,7 @@ def add_job(Session, *, status=JobStatus.WAITING, minutes=10,
             deadline_in=timedelta(hours=10), scheduled_in=timedelta(hours=1)):
     with Session() as db:
         job = Job(
+            user_id=1,
             name="demo",
             deadline=now() + deadline_in,
             estimated_minutes=minutes,
