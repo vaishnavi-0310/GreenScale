@@ -1049,7 +1049,24 @@ function osloToIso(dateStr,timeStr){
   t=want-(osloWall(t)-t);
   return new Date(t).toISOString()
 }
-function reschedulePanel(j){
+function cancelPanel(j){
+  const st=String(j.status||'').toLowerCase();
+  if(st!=='pending'&&st!=='waiting')return '';
+  return `<div class="notice"><strong>Cancel</strong><div class="hint">Stop this job before it starts. A job that is already running cannot be cancelled.</div><div id="cancel-error" class="error" role="alert"></div><div class="form-actions"><button class="secondary" id="cancel-button" style="color:var(--red)" onclick="cancelJob(${Number(j.id)})">Cancel job</button></div></div>`
+}
+async function cancelJob(id){
+  const err=document.getElementById('cancel-error'),btn=document.getElementById('cancel-button');
+  if(!confirm('Cancel this job? It will not run, and this cannot be undone.'))return;
+  err.textContent='';
+  try{
+    btn.disabled=true;
+    await readApiResponse(await fetch(`/jobs/${id}/cancel`,{method:'POST',credentials:'same-origin'}));
+    await loadJobs();
+    openDetail(id)
+  }catch(e){err.textContent=e.message;btn.disabled=false}
+}
+function reschedulePanel(j){return reschedulePanelBase(j)+cancelPanel(j)}
+function reschedulePanelBase(j){
   if(String(j.status||'').toLowerCase()!=='waiting')return '';
   const p=osloParts(j.scheduled_for);
   return `<div class="notice"><strong>Reschedule</strong><div class="hint">Move this job's planned start. Only waiting jobs can be moved, and the new start must still leave time to finish before the deadline.</div><div class="formgrid" style="margin-top:10px"><div class="field"><label for="rs-date">New start date</label><input id="rs-date" type="date" value="${esc(p.date)}"></div><div class="field"><label for="rs-time">New start time (Norway)</label><input id="rs-time" type="time" value="${esc(p.time)}"></div><div class="field full"><label for="rs-note">Note (optional)</label><input id="rs-note" type="text" maxlength="200" placeholder="Why is it being moved?"></div></div><div id="rs-error" class="error" role="alert"></div><div class="form-actions"><button class="secondary" id="rs-now" onclick="rescheduleJob(${Number(j.id)},true)">Run now</button><button class="primary" id="rs-save" onclick="rescheduleJob(${Number(j.id)},false)">Save new time</button></div></div>`
