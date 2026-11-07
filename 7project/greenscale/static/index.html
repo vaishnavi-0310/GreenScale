@@ -758,6 +758,7 @@ select,.secondary {
   <script>
 let jobs=[];
 let overviewJobs=[];
+let nextPlannedJob=null;
 let jobPage=0;
 let jobTotal=0;
 const JOB_PAGE_SIZE=10;
@@ -843,19 +844,22 @@ async function loadJobs(resetPage=false){
       offset:String(jobPage*JOB_PAGE_SIZE)
     });
     if(statusFilter)params.set('status',statusFilter);
-    const [pageResponse,overviewResponse]=await Promise.all([
+    const [pageResponse,overviewResponse,nextPlannedResponse]=await Promise.all([
       fetch(`/jobs?${params.toString()}`),
-      fetch('/jobs?limit=50&offset=0')
+      fetch('/jobs?limit=50&offset=0'),
+      fetch('/jobs/next-planned')
     ]);
-    if(pageResponse.status===401||overviewResponse.status===401){
+    if(pageResponse.status===401||overviewResponse.status===401||nextPlannedResponse.status===401){
       window.location.replace('/login');
       return
     }
     if(!pageResponse.ok)throw Error(`API returned ${pageResponse.status}`);
     if(!overviewResponse.ok)throw Error(`Overview API returned ${overviewResponse.status}`);
+    if(!nextPlannedResponse.ok)throw Error(`Next planned job API returned ${nextPlannedResponse.status}`);
     jobs=await pageResponse.json();
     jobTotal=Number(pageResponse.headers.get('X-Total-Count')||jobs.length);
     overviewJobs=await overviewResponse.json();
+    nextPlannedJob=await nextPlannedResponse.json();
     renderOverview();
     renderJobs()
   }
@@ -897,8 +901,7 @@ function renderOverview(){
   });
   document.getElementById('stats').innerHTML=Object.entries(counts).slice(0,
   4).map(([k,v])=>`<div class="card"><div class="stat-label">${esc(k[0].toUpperCase()+k.slice(1))} jobs</div><div class="stat">${v}</div></div>`).join('');
-  let upcoming=overviewJobs.filter(j=>j.scheduled_for).sort((a,
-  b)=>new Date(a.scheduled_for)-new Date(b.scheduled_for))[0];
+  let upcoming=nextPlannedJob;
   document.getElementById('next-job').innerHTML=upcoming?`<div class="datebox"><small>Planned</small>${new Date(upcoming.scheduled_for).toLocaleDateString([], {
     month:'short',
     day:'numeric'
