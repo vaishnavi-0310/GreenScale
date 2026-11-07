@@ -317,7 +317,14 @@ def get_job_result(
             tail_lines=200,
         )
 
-        result = json.loads(logs)
+        try:
+            result = json.loads(logs)
+        except json.JSONDecodeError:
+            # Some Kubernetes log responses expose Python's mapping repr
+            # instead of the worker's JSON text. Parse only safe literals.
+            import ast
+
+            result = ast.literal_eval(logs)
 
         if not isinstance(result, dict) or result.get("workload") != "csv_summary":
             raise ValueError("Unexpected worker result format")
