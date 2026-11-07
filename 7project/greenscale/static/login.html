@@ -6,46 +6,298 @@
   <meta name="theme-color" content="#f5f8f4">
   <title>Sign in · GreenScale</title>
   <style>
-    :root{color-scheme:light;--ink:#17352b;--muted:#73827b;--line:#dfe8e1;--green:#237a55;--green-dark:#176443;--mint:#e8f3ec;--paper:#f5f8f4;--white:#fff;--error:#b64242}
-    *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);font:15px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:28px}
-    button,input{font:inherit}
-    .layout{width:min(100%,1020px);min-height:620px;display:grid;grid-template-columns:1.02fr .98fr;background:var(--white);border:1px solid var(--line);border-radius:24px;overflow:hidden;box-shadow:0 22px 70px #153a2712}
-    .brand-panel{position:relative;overflow:hidden;background:#eaf4ed;padding:48px;display:flex;flex-direction:column;justify-content:space-between}
-    .brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:20px;letter-spacing:-.03em}
-    .mark{width:39px;height:39px;border-radius:13px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:22px}
-    .hero{position:relative;z-index:1;margin:auto 0;padding:46px 0}
-    .eyebrow{color:var(--green);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
-    h1{font-size:clamp(35px,5vw,55px);line-height:1.04;letter-spacing:-.055em;margin:14px 0 18px;max-width:460px}
-    .hero p{color:#62776c;font-size:17px;max-width:390px;margin:0}
-    .visual{position:absolute;width:290px;height:290px;border-radius:50%;right:-65px;bottom:-85px;background:linear-gradient(145deg,#d7eadb,#b7d9c1);opacity:.75}
-    .visual:before,.visual:after{content:"";position:absolute;border:1px solid #5d9b72;border-radius:50%;inset:32px}
-    .visual:after{inset:70px}
-    .brand-foot{position:relative;z-index:1;color:#6e8276;font-size:12px}
-    .form-panel{padding:48px clamp(28px,5vw,64px);display:flex;flex-direction:column;justify-content:center}
-    .form-head h2{font-size:29px;letter-spacing:-.04em;margin:0 0 6px}
-    .form-head p{margin:0;color:var(--muted)}
-    .tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:28px 0 24px;padding:5px;border-radius:11px;background:#f2f6f2}
-    .tab{border:0;border-radius:8px;background:transparent;color:#65766d;padding:10px;font-weight:700;cursor:pointer}
-    .tab[aria-selected="true"]{background:#fff;color:var(--green);box-shadow:0 1px 4px #183f2b14}
-    .fields{display:grid;gap:16px}
-    .field{display:grid;gap:7px}
-    .field[hidden]{display:none}
-    label{font-size:13px;font-weight:700}
-    .input-wrap{position:relative}
-    input{width:100%;height:47px;border:1px solid var(--line);border-radius:9px;padding:0 13px;color:var(--ink);background:#fff;outline:none;transition:border-color .15s,box-shadow .15s}
-    input::placeholder{color:#a0aaa4}
-    input:focus{border-color:#4c9a70;box-shadow:0 0 0 3px #237a5517}
-    .toggle-password{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);font-size:12px;font-weight:700;padding:6px;cursor:pointer}
-    .password-input{padding-right:56px}
-    .submit{height:48px;margin-top:4px;border:0;border-radius:9px;background:var(--green);color:#fff;font-weight:750;cursor:pointer;transition:background .15s,transform .15s}
-    .submit:hover{background:var(--green-dark);transform:translateY(-1px)}
-    .message{min-height:20px;margin:0;color:var(--error);font-size:13px}
-    .message.success{color:var(--green)}
-    .demo-note{margin:16px 0 0;padding:12px 13px;border-radius:9px;background:#f5f8f5;color:#748179;font-size:12px}
-    .back{display:inline-flex;align-items:center;gap:6px;margin-top:24px;color:var(--green);font-size:13px;font-weight:700;text-decoration:none;width:max-content}
-    .back:hover{text-decoration:underline}
-    @media(max-width:720px){body{padding:14px}.layout{grid-template-columns:1fr;min-height:0}.brand-panel{min-height:210px;padding:24px 26px}.hero{padding:36px 0 25px}.hero h1{font-size:36px;max-width:500px}.hero p{font-size:15px}.visual{width:200px;height:200px;right:-70px;bottom:-90px}.brand-foot{display:none}.form-panel{padding:30px 26px 34px}.tabs{margin:22px 0}}
+    :root {
+      color-scheme: light;
+      --ink: #17352b;
+      --muted: #73827b;
+      --line: #dfe8e1;
+      --green: #237a55;
+      --green-dark: #176443;
+      --mint: #e8f3ec;
+      --paper: #f5f8f4;
+      --white: #fff;
+      --error: #b64242;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--ink);
+      font: 15px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+    }
+    button, input {
+      font: inherit;
+    }
+    .layout {
+      width: min(100%, 1020px);
+      min-height: 620px;
+      display: grid;
+      grid-template-columns: 1.02fr .98fr;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 22px 70px #153a2712;
+    }
+    .brand-panel {
+      position: relative;
+      overflow: hidden;
+      background: #eaf4ed;
+      padding: 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -.03em;
+    }
+    .mark {
+      width: 39px;
+      height: 39px;
+      border-radius: 13px;
+      background: var(--green);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+    }
+    .hero {
+      position: relative;
+      z-index: 1;
+      margin: auto 0;
+      padding: 46px 0;
+    }
+    .eyebrow {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: clamp(35px, 5vw, 55px);
+      line-height: 1.04;
+      letter-spacing: -.055em;
+      margin: 14px 0 18px;
+      max-width: 460px;
+    }
+    .hero p {
+      color: #62776c;
+      font-size: 17px;
+      max-width: 390px;
+      margin: 0;
+    }
+    .visual {
+      position: absolute;
+      width: 290px;
+      height: 290px;
+      border-radius: 50%;
+      right: -65px;
+      bottom: -85px;
+      background: linear-gradient(145deg, #d7eadb, #b7d9c1);
+      opacity: .75;
+    }
+    .visual:before, .visual:after {
+      content: "";
+      position: absolute;
+      border: 1px solid #5d9b72;
+      border-radius: 50%;
+      inset: 32px;
+    }
+    .visual:after {
+      inset: 70px;
+    }
+    .brand-foot {
+      position: relative;
+      z-index: 1;
+      color: #6e8276;
+      font-size: 12px;
+    }
+    .form-panel {
+      padding: 48px clamp(28px, 5vw, 64px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .form-head h2 {
+      font-size: 29px;
+      letter-spacing: -.04em;
+      margin: 0 0 6px;
+    }
+    .form-head p {
+      margin: 0;
+      color: var(--muted);
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      margin: 28px 0 24px;
+      padding: 5px;
+      border-radius: 11px;
+      background: #f2f6f2;
+    }
+    .tab {
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #65766d;
+      padding: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .tab[aria-selected="true"] {
+      background: #fff;
+      color: var(--green);
+      box-shadow: 0 1px 4px #183f2b14;
+    }
+    .fields {
+      display: grid;
+      gap: 16px;
+    }
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+    .field[hidden] {
+      display: none;
+    }
+    label {
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .input-wrap {
+      position: relative;
+    }
+    input {
+      width: 100%;
+      height: 47px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 0 13px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input::placeholder {
+      color: #a0aaa4;
+    }
+    input:focus {
+      border-color: #4c9a70;
+      box-shadow: 0 0 0 3px #237a5517;
+    }
+    .toggle-password {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px;
+      cursor: pointer;
+    }
+    .password-input {
+      padding-right: 56px;
+    }
+    .submit {
+      height: 48px;
+      margin-top: 4px;
+      border: 0;
+      border-radius: 9px;
+      background: var(--green);
+      color: #fff;
+      font-weight: 750;
+      cursor: pointer;
+      transition: background .15s, transform .15s;
+    }
+    .submit:hover {
+      background: var(--green-dark);
+      transform: translateY(-1px);
+    }
+    .message {
+      min-height: 20px;
+      margin: 0;
+      color: var(--error);
+      font-size: 13px;
+    }
+    .message.success {
+      color: var(--green);
+    }
+    .demo-note {
+      margin: 16px 0 0;
+      padding: 12px 13px;
+      border-radius: 9px;
+      background: #f5f8f5;
+      color: #748179;
+      font-size: 12px;
+    }
+    .back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 24px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      width: max-content;
+    }
+    .back:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 720px) {
+      body {
+        padding: 14px;
+      }
+      .layout {
+        grid-template-columns: 1fr;
+        min-height: 0;
+      }
+      .brand-panel {
+        min-height: 210px;
+        padding: 24px 26px;
+      }
+      .hero {
+        padding: 36px 0 25px;
+      }
+      .hero h1 {
+        font-size: 36px;
+        max-width: 500px;
+      }
+      .hero p {
+        font-size: 15px;
+      }
+      .visual {
+        width: 200px;
+        height: 200px;
+        right: -70px;
+        bottom: -90px;
+      }
+      .brand-foot {
+        display: none;
+      }
+      .form-panel {
+        padding: 30px 26px 34px;
+      }
+      .tabs {
+        margin: 22px 0;
+      }
+    }
   </style>
 </head>
 <body>
@@ -67,31 +319,92 @@
         <p id="form-subtitle">Sign in to continue to your planner.</p>
       </header>
       <div class="tabs" role="tablist" aria-label="Account access">
-        <button class="tab" id="login-tab" type="button" role="tab" aria-selected="true" aria-controls="auth-form">Sign in</button>
-        <button class="tab" id="register-tab" type="button" role="tab" aria-selected="false" aria-controls="auth-form">Create account</button>
+        <button
+          class="tab"
+          id="login-tab"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="auth-form"
+        >
+          Sign in
+        </button>
+        <button
+          class="tab"
+          id="register-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="auth-form"
+        >
+          Create account
+        </button>
       </div>
       <form id="auth-form" novalidate>
         <div class="fields">
           <div class="field" id="name-field" hidden>
             <label for="name">Full name</label>
-            <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" minlength="1">
+            <input
+              id="name"
+              name="name"
+              type="text"
+              autocomplete="name"
+              placeholder="Your name"
+              minlength="1"
+            >
           </div>
           <div class="field">
             <label for="email">Email address</label>
-            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="you@example.com"
+              required
+            >
           </div>
           <div class="field">
             <label for="password">Password</label>
             <div class="input-wrap">
-              <input class="password-input" id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
-              <button class="toggle-password" type="button" data-target="password" aria-label="Show password">Show</button>
+              <input
+                class="password-input"
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter your password"
+                required
+              >
+              <button
+                class="toggle-password"
+                type="button"
+                data-target="password"
+                aria-label="Show password"
+              >
+                Show
+              </button>
             </div>
           </div>
           <div class="field" id="confirm-field" hidden>
             <label for="confirm-password">Confirm password</label>
             <div class="input-wrap">
-              <input class="password-input" id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" placeholder="Enter your password again">
-              <button class="toggle-password" type="button" data-target="confirm-password" aria-label="Show confirm password">Show</button>
+              <input
+                class="password-input"
+                id="confirm-password"
+                name="confirm-password"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Enter your password again"
+              >
+              <button
+                class="toggle-password"
+                type="button"
+                data-target="confirm-password"
+                aria-label="Show confirm password"
+              >
+                Show
+              </button>
             </div>
           </div>
           <p class="message" id="form-message" role="status" aria-live="polite"></p>
@@ -131,7 +444,9 @@
       confirmInput.required = registering;
       passwordInput.autocomplete = registering ? 'new-password' : 'current-password';
       title.textContent = registering ? 'Create your account' : 'Welcome back';
-      subtitle.textContent = registering ? 'Set up your GreenScale account.' : 'Sign in to continue to your planner.';
+      subtitle.textContent = registering
+        ? 'Set up your GreenScale account.'
+        : 'Sign in to continue to your planner.';
       submitButton.textContent = registering ? 'Create account' : 'Sign in';
       message.textContent = '';
       message.className = 'message';
@@ -145,7 +460,10 @@
         const visible = input.type === 'password';
         input.type = visible ? 'text' : 'password';
         button.textContent = visible ? 'Hide' : 'Show';
-        button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${button.dataset.target === 'password' ? 'password' : 'confirm password'}`);
+        button.setAttribute(
+          'aria-label',
+          `${visible ? 'Hide' : 'Show'} ${button.dataset.target === 'password' ? 'password' : 'confirm password'}`
+        );
       });
     });
 
@@ -176,7 +494,9 @@
         const result = await response.json().catch(() => ({}));
         if (!response.ok) {
           const detail = result.detail;
-          message.textContent = Array.isArray(detail) ? detail.map(item => item.msg).join('. ') : (detail || 'Could not authenticate. Try again.');
+          message.textContent = Array.isArray(detail)
+            ? detail.map(item => item.msg).join('. ')
+            : (detail || 'Could not authenticate. Try again.');
           return;
         }
         message.className = 'message success';
@@ -205,7 +525,7 @@
     });
 
     if (!registrationComplete) {
-      fetch('/auth/me', {credentials: 'same-origin'}).then(response => {
+      fetch('/auth/me', { credentials: 'same-origin' }).then(response => {
         if (response.ok) window.location.replace('/');
       }).catch(() => {});
     }
