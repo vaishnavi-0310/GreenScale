@@ -48,6 +48,7 @@ class JobRead(BaseModel):
     id: int
     name: str
     description: str | None
+    llm_response: str | None
     workload_type: str | None
     input_size_mb: int | None
     priority: Priority

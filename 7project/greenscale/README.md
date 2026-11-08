@@ -42,13 +42,14 @@ Copy-Item .env.example .env        # then edit secrets locally; .env is git-igno
 With the venv activated and Docker Desktop running:
 
 ```bash
-docker compose up -d --build app
+docker compose up -d --build
 python -m uvicorn app.main:app --reload
 ```
 
 Windows PowerShell is the same after `Activate.ps1`.
 
 - Health: http://127.0.0.1:8000/health
+- Sign in / register: http://127.0.0.1:8000/login
 - Docs: http://127.0.0.1:8000/docs
 
 ## Tests
@@ -61,6 +62,17 @@ pytest
 
 Windows: `.\.venv\Scripts\Activate.ps1` then `pytest`.
 
+## Accounts and login
+
+GreenScale provides email/password registration and sign-in at `/login`. Passwords
+are stored as PBKDF2 hashes, and successful sign-in creates a seven-day HttpOnly
+session cookie. Job API endpoints require a session and each account sees only its
+own jobs. Sign out from the dashboard sidebar.
+
+For an existing PostgreSQL database, apply `migrations/002_add_user_auth.sql`
+before deploying the authentication-enabled API. Existing jobs keep their rows
+but remain unassigned to an account; new jobs are linked to the signed-in account.
+
 ## Price adapter (`app/prices.py`)
 
 `fetch_day(day, area="NO2")` downloads the published day-ahead spot prices for one
@@ -68,11 +80,11 @@ calendar day from [hvakosterstrommen.no](https://www.hvakosterstrommen.no/stromp
 and returns a list of `PriceSlot(start, end, nok_per_kwh)` sorted by start time.
 
 - Intervals are taken from the provider's ISO 8601 `time_start` / `time_end`
-  fields; the adapter never assumes "array index == hour".
+fields; the adapter never assumes "array index == hour".
 - All timestamps are timezone-aware. Naive timestamps or `end <= start` raise `ValueError`.
 - Tomorrow's file is published no earlier than ~13:00 local time, so an HTTP 404
 for tomorrow is normal and is raised as `httpx.HTTPStatusError`. Callers should
-  keep the job pending rather than invent prices.
+keep the job pending rather than invent prices.
 - Unit tests use `httpx.MockTransport` and `fixtures/sample_prices.json`; no network needed.
 
 Live check against today's NO2 prices (venv activated):
@@ -149,18 +161,27 @@ Supported worker commands are allowlisted in `execution/worker.py`:
 - `sleep`: sleeps for the job's planned runtime (`estimated_minutes`).
 - `factorial`: computes a bounded factorial, scaling the input from `input_size_mb`.
 - `csv_summary`: streams a CSV from a `gs://bucket/object` URI included in the
-  description. The declared input size is capped at 500 MB. The GKE workload
-  identity for `greenscale-executor` needs read-only access to the source bucket.
-  For GKE Workload Identity, link that Kubernetes service account to a Google
-  service account and grant `roles/storage.objectViewer` on the input bucket only.
-  The cluster must have Workload Identity Federation enabled.
+description. The job form can upload CSV files up to 20 MiB to the configured
+GCS bucket and include the returned URI in the request. Direct GCS inputs can be
+up to 500 MiB. The GKE workload identity for `greenscale-executor` needs
+read-only access to the source bucket. The API identity needs permission to
+upload objects. The cluster must have Workload Identity Federation enabled.
+
+When a CSV summary job succeeds, its detail page offers **View results**. The
+API reads the summary from the worker Pod logs; results are not stored in the
+database and stop being available when Kubernetes deletes the Pod (the Job TTL
+is one hour). `k8s/executor-rbac.yaml` grants the API service account permission
+to list worker Pods and read their logs.
 
 Build and publish the image tag referenced by the Kubernetes manifests, then apply
-the manifests to the `greenscale` namespace:
+the manifests to the `greenscale` namespace. The API, dispatcher, and worker now
+use the same image tag so the UI endpoints and result worker are deployed together:
 
 ```bash
 # Run from the greenscale project directory.
 # Prerequisites: namespace, database, Secrets, and API ServiceAccount.
+gcloud builds submit --tag \
+  europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:csv-ui-v1
 
 kubectl apply -f k8s/executor-rbac.yaml
 kubectl apply -f k8s/api-deployment.yaml
@@ -173,5 +194,5 @@ kubectl get deployments,cronjobs -n greenscale
 
 Check the dispatcher and workload Jobs with `kubectl get jobs -n greenscale`. A
 workload job is named `gs-<GreenScale job id>`; inspect its output with
-`kubectl logs job/gs-<id> -n greenscale`. CSV jobs need an accessible Cloud
-Storage object URI; the UI does not upload files.
+`kubectl logs job/gs-<id> -n greenscale`. CSV uploads use the authenticated
+`POST /jobs/upload-csv` endpoint before GreenScale submits the job for planning.

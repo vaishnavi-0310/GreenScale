@@ -3,17 +3,19 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401
+from app.auth import get_optional_current_user, router as auth_router
 from app.config import settings
 from app.db import Base, engine
 from app.health import router as health_router
 from app.logging_config import setup_logging
 from app.routes import router as jobs_router
 from app.reschedule import router as reschedule_router
+from app.cancel import router as cancel_router
 
 setup_logging(settings.log_level)
 logger = logging.getLogger("greenscale")
@@ -67,14 +69,23 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+app.include_router(auth_router)
 app.include_router(jobs_router)
 app.include_router(reschedule_router)
+app.include_router(cancel_router)
 app.include_router(health_router)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.get("/login", include_in_schema=False)
+def login_page():
+    return FileResponse(STATIC_DIR / "login.html")
+
+
 @app.get("/", include_in_schema=False)
-def ui():
+def ui(user=Depends(get_optional_current_user)):
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
     return FileResponse(STATIC_DIR / "index.html")
