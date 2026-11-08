@@ -19,6 +19,7 @@ class JobStatus(str, enum.Enum):
     RUNNING = "running"        # Kubernetes Job created
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"    # stopped by the user before it started
 
 
 def utcnow() -> datetime:
