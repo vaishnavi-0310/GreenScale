@@ -148,6 +148,25 @@ def list_jobs(
     return db.scalars(stmt.limit(limit).offset(offset)).all()
 
 
+@router.get("/next-planned", response_model=JobRead | None)
+def get_next_planned_job(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return this user's earliest scheduled job that is still waiting."""
+    stmt = (
+        select(Job)
+        .where(
+            Job.user_id == user.id,
+            Job.status == JobStatus.WAITING,
+            Job.scheduled_for.is_not(None),
+        )
+        .order_by(Job.scheduled_for.asc(), Job.id.asc())
+        .limit(1)
+    )
+    return db.scalar(stmt)
+
+
 @router.get("/{job_id}", response_model=JobRead)
 def get_job(
     job_id: int,
@@ -298,7 +317,14 @@ def get_job_result(
             tail_lines=200,
         )
 
-        result = json.loads(logs)
+        try:
+            result = json.loads(logs)
+        except json.JSONDecodeError:
+            # Some Kubernetes log responses expose Python's mapping repr
+            # instead of the worker's JSON text. Parse only safe literals.
+            import ast
+
+            result = ast.literal_eval(logs)
 
         if not isinstance(result, dict) or result.get("workload") != "csv_summary":
             raise ValueError("Unexpected worker result format")
