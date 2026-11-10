@@ -1,840 +1,208 @@
 # GreenScale — GKE Deployment Runbook
 
-## 1. Purpose
+This guide explains how to connect to the team's existing Google Kubernetes Engine (GKE) cluster, deploy GreenScale components, and check that they work. **Run commands in Google Cloud Shell from `~/Group-24/7project/greenscale` unless stated otherwise.**
 
-This runbook documents how to deploy, verify, and operate the GreenScale FastAPI application and PostgreSQL database on Google Kubernetes Engine (GKE).
+> **Important:** The project already has a working GKE environment. Do not recreate its database Secrets, delete its PersistentVolumeClaim (PVC), or apply fresh-install steps to the running cluster unnecessarily.
 
-GreenScale is a Kubernetes-based batch-job scheduling prototype that uses Norwegian electricity prices and Gemini runtime predictions to select preferred execution times.
+## 1. What GreenScale runs on GKE
 
-This document covers the infrastructure currently deployed on GKE. End-to-end integration of the automatic Kubernetes Job executor must be verified separately.
+| Component | Purpose | Repository file |
+|---|---|---|
+| FastAPI and web UI | Accepts jobs and displays their status | `k8s/api-deployment.yaml`, `k8s/api-service.yaml` |
+| PostgreSQL | Stores jobs, users, and scheduling results | `k8s/postgres-deployment.yaml`, `k8s/postgres-service.yaml`, `k8s/postgres-pvc.yaml` |
+| Planner CronJob | Plans pending jobs every **5 minutes** using runtime estimates and NO2 prices | `k8s/planner-cronjob.yaml` |
+| Dispatcher CronJob | Checks ready jobs every **minute**, starts Kubernetes Jobs, and updates status | `k8s/dispatcher-cronjob.yaml` |
+| Executor permissions | Grants required Kubernetes permissions | `k8s/executor-rbac.yaml` |
+| Worker | Runs supported `sleep`, `factorial`, and `csv_summary` workloads | `execution/worker.py` |
 
-## 2. Prerequisites
+Typical workflow: **submit job → store in PostgreSQL → estimate runtime and choose a start time → dispatch Kubernetes Job → run worker → update status**.
 
-The following are required:
+The team has demonstrated automatic Kubernetes Job execution on GKE. This is **not** the same as verifying a fresh installation in a new GCP project.
 
-- Access to the GreenScale Google Cloud project
-- Appropriate Google Cloud IAM and Kubernetes permissions
-- Google Cloud CLI (`gcloud`)
-- Kubernetes CLI (`kubectl`)
-- Access to the GreenScale GitHub repository
-- Docker, when building and publishing a new container image
-
-Google Cloud Shell provides `gcloud` and `kubectl`.
-
-Do not store database passwords, access tokens, or service account keys in Git.
-
-## 3. Google Cloud Configuration
+## 2. Existing cloud environment
 
 | Setting | Value |
 |---|---|
-| GCP Project ID | `greenscale-group24-512813` |
-| GKE Cluster | `greenscale-cluster1` |
-| Region | `europe-north1` |
+| Google Cloud project | `greenscale-group24-512813` |
+| GKE cluster | `greenscale-cluster1` |
 | Zone | `europe-north1-a` |
+| Region | `europe-north1` |
 | Namespace | `greenscale` |
-| API Image | `europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2` |
-| API Service | `greenscale-api-service` |
-| PostgreSQL Service | `greenscale-postgres` |
+| API Service | `greenscale-api-service` (port 8000, `ClusterIP`) |
+| Database Service | `greenscale-postgres` (port 5432) |
+| PostgreSQL PVC | `greenscale-postgres-pvc` (10 GiB, `standard-rwo`) |
 
-## 3.1. Fresh Deployment Prerequisites
+**Prerequisites:** Access to the GCP project and cluster; `gcloud` and `kubectl` (both available in Cloud Shell); the GreenScale repository; appropriate IAM/Kubernetes permissions. GKE and persistent disks may incur costs.
 
-The instructions in this runbook currently target the existing GKE cluster `greenscale-cluster1`.
+## 3. Connect to the existing cluster
 
-A fresh deployment requires the following resources and configuration.
+```bash
+gcloud config set project greenscale-group24-512813
+gcloud container clusters get-credentials greenscale-cluster1 \
+  --zone europe-north1-a --project greenscale-group24-512813
+cd ~/Group-24/7project/greenscale
+kubectl config current-context
+kubectl get nodes
+kubectl get deployments,pods,services,pvc,cronjobs -n greenscale
+```
 
-### A. Google Cloud resources
+If the repository is not yet in Cloud Shell, clone the team's repository before the `cd` command. Do not run the deployment commands from a different directory.
 
-- An active Google Cloud project with billing enabled
-- Google Kubernetes Engine API enabled
-- Vertex AI API enabled
-- A running GKE cluster
-- GKE Workload Identity Federation enabled
-- Appropriate IAM permissions for deployment and Vertex AI access
+## 4. Fresh-install prerequisites (skip if already configured)
 
-The current deployment uses:
+These steps are **only for a new installation**, not routine updates to the team's working cluster.
 
-- Project: `greenscale-group24-512813`
-- Cluster: `greenscale-cluster1`
-- Zone: `europe-north1-a`
+A new GCP environment needs a running GKE cluster, the required Google Cloud APIs, billing, a container image in Artifact Registry, and appropriate permissions. The team's manifests contain project-specific values and must be adjusted for another project.
 
-Cluster creation is not required when using the existing environment.
-
-### B. Kubernetes resources
-
-The following must exist before deploying the FastAPI application:
-
-| Resource | Name | Purpose |
-|---|---|---|
-| Namespace | `greenscale` | Isolates GreenScale resources |
-| ServiceAccount | `greenscale-api` | Provides the API's Kubernetes identity |
-| Secret | `greenscale-postgres-secret` | PostgreSQL initialization credentials |
-| Secret | `greenscale-db-secret` | FastAPI database connection string |
-| PersistentVolumeClaim | `greenscale-postgres-pvc` | PostgreSQL persistent storage |
-| PostgreSQL Service | `greenscale-postgres` | Internal database network address |
-
-The namespace, ServiceAccount, and Secrets were originally created using Kubernetes commands. They are not all defined in the current version-controlled manifests.
-
-### C. Database credentials
-
-Database credentials must be created securely and must not be committed to GitHub.
-
-The PostgreSQL Secret contains:
-
-- `POSTGRES_USER`
-- `POSTGRES_PASSWORD`
-- `POSTGRES_DB`
-
-The API database Secret contains:
-
-- `database-url`
-
-The `database-url` value uses the SQLAlchemy PostgreSQL connection format and references the Kubernetes PostgreSQL Service.
-
-Credential creation and database deployment are covered in the following deployment procedure.
-
-### D. Docker image
-
-The current API manifest uses:
-
-`europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2`
-
-Kubernetes pulls this image from Google Artifact Registry in europe-north1.
-
-The image contains the FastAPI application and its Python dependencies. PostgreSQL is deployed separately.
-
-### E. Deployment order
-
-For a fresh installation, deploy resources in this logical order:
-
-1. Namespace
-2. Kubernetes ServiceAccount and required IAM bindings
-3. Database Secrets
-4. PostgreSQL PersistentVolumeClaim
-5. PostgreSQL Deployment and Service
-6. FastAPI Deployment and Service
-7. Health checks and smoke tests
-
-The Kubernetes Job executor and its RBAC configuration must be deployed and verified separately as part of the full batch-execution integration.
-
-### F. Important safety precautions
-
-- Do not recreate Secrets unnecessarily in the working cluster.
-- Do not delete the PostgreSQL PVC during routine application updates.
-- Do not store database passwords or API keys in Git.
-- Use least-privilege IAM and Kubernetes RBAC.
-- Be aware that running GKE nodes and persistent disks can generate charges.
-
-## 3.2. Create Namespace and API ServiceAccount
-
-**Important:** The commands in this section are intended for a fresh installation. On the existing GreenScale GKE cluster, these resources have already been created.
-
-### A. Create the namespace
+### 4.1 Namespace, ServiceAccount, and cloud identity
 
 ```bash
 kubectl create namespace greenscale
-```
-
-This creates a dedicated Kubernetes namespace for GreenScale resources.
-
-Verify:
-
-```bash
-kubectl get namespaces
-```
-
-Expected namespace: `greenscale`.
-
-If the namespace already exists, do not recreate it.
-
-### B. Create the FastAPI ServiceAccount
-
-```bash
 kubectl create serviceaccount greenscale-api -n greenscale
 ```
 
-The ServiceAccount provides an identity to the FastAPI Pod.
-
-Verify:
-
-```bash
-kubectl get serviceaccounts -n greenscale
-```
-
-Expected ServiceAccount: `greenscale-api`.
-
-The FastAPI Deployment references this identity using:
-
-```yaml
-serviceAccountName: greenscale-api
-```
-
-### C. Configure Google Cloud Workload Identity Federation
-
-The existing GKE cluster has Workload Identity Federation enabled.
-
-Verify its configuration:
+The API Deployment uses the Kubernetes ServiceAccount `greenscale-api`. The existing project uses GKE Workload Identity Federation to grant it Vertex AI access (`roles/aiplatform.user`). Verify the existing cluster's pool:
 
 ```bash
 gcloud container clusters describe greenscale-cluster1 \
   --zone europe-north1-a \
-  --format="value(workloadIdentityConfig.workloadPool)"
+  --format='value(workloadIdentityConfig.workloadPool)'
 ```
 
-Expected:
+Expected in the team's project: `greenscale-group24-512813.svc.id.goog`. **A new project needs its own identity and IAM setup; copying the team's identifier will not configure access.**
 
-```text
-greenscale-group24-512813.svc.id.goog
-```
+### 4.2 Database Secrets
 
-The GreenScale API Kubernetes ServiceAccount is authorized to access Vertex AI using an IAM principal binding.
-
-For the existing project, the IAM principal is:
-
-```text
-principal://iam.googleapis.com/projects/725624792033/locations/global/workloadIdentityPools/greenscale-group24-512813.svc.id.goog/subject/ns/greenscale/sa/greenscale-api
-```
-
-The principal has the Google Cloud IAM role `roles/aiplatform.user`.
-
-In a fresh Google Cloud project, the project number, Workload Identity pool, and IAM permissions must be configured for that project. Do not reuse the existing project's identifiers in a different project.
-
-### D. Verify the API identity
-
-```bash
-kubectl get serviceaccount greenscale-api -n greenscale
-```
-
-Inspect the Deployment identity after deployment:
-
-```bash
-kubectl get deployment greenscale-api -n greenscale \
-  -o jsonpath='{.spec.template.spec.serviceAccountName}{"\n"}'
-```
-
-Expected:
-
-```text
-greenscale-api
-```
-
-This confirms that the Deployment is configured to use the expected Kubernetes ServiceAccount.
-
-A successful Gemini request through Vertex AI provides additional verification that authentication and authorization work.
-
-## 3.3. Create PostgreSQL Kubernetes Secrets
-
-GreenScale uses Kubernetes Secrets to provide database credentials to PostgreSQL and FastAPI.
-
-These instructions are intended for a fresh deployment. **Do not execute them against the existing GreenScale namespace**, because the database credentials and database contents must be preserved.
-
-### A. Choose database settings
-
-The current deployment uses:
-
-- Username: `greenscale`
-- Database name: `greenscale`
-- PostgreSQL Service: `greenscale-postgres`
-- Port: `5432`
-
-Generate a strong password locally in Google Cloud Shell:
+Create these **only when initializing a new database**. Never commit passwords or Secret values.
 
 ```bash
 DB_PASSWORD="$(openssl rand -hex 24)"
-```
-
-This generates a random hexadecimal password and saves it temporarily in the current shell session.
-
-Do not print, commit, or share the password.
-
-### B. Create the PostgreSQL Secret
-
-```bash
-kubectl create secret generic greenscale-postgres-secret \
-  --namespace greenscale \
+kubectl create secret generic greenscale-postgres-secret -n greenscale \
   --from-literal=POSTGRES_USER=greenscale \
   --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" \
   --from-literal=POSTGRES_DB=greenscale
-```
-
-PostgreSQL reads these values through its Deployment's `envFrom` configuration.
-
-### C. Create the FastAPI database Secret
-
-```bash
 DATABASE_URL="postgresql+psycopg://greenscale:${DB_PASSWORD}@greenscale-postgres:5432/greenscale"
-
-kubectl create secret generic greenscale-db-secret \
-  --namespace greenscale \
+kubectl create secret generic greenscale-db-secret -n greenscale \
   --from-literal=database-url="$DATABASE_URL"
-```
-
-Both Secrets must contain the same database password.
-
-The URL uses the `psycopg` PostgreSQL driver.
-
-### D. Remove temporary shell variables
-
-```bash
 unset DB_PASSWORD DATABASE_URL
+kubectl get secrets -n greenscale
 ```
 
-This removes the values from the current shell environment, although it does not erase all possible copies from shell history, Kubernetes state, or administrative audit logs.
+Replacing a Secret **does not** change an existing PostgreSQL account's password. Do not regenerate credentials for an active database.
 
-### E. Verify that the Secrets exist
+## 5. Deploy or update components
 
-```bash
-kubectl get secret greenscale-postgres-secret -n greenscale
-kubectl get secret greenscale-db-secret -n greenscale
-```
+First check that the namespace, ServiceAccount, database Secrets, image references, and access permissions are correct. Review the image tags in the manifests before applying them: they have changed during development and **must not be assumed to match an older runbook**.
 
-To inspect the available key names without displaying credential values:
-
-```bash
-kubectl describe secret greenscale-postgres-secret -n greenscale
-kubectl describe secret greenscale-db-secret -n greenscale
-```
-
-Expected keys:
-
-| Secret | Expected keys |
-|---|---|
-| `greenscale-postgres-secret` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
-| `greenscale-db-secret` | `database-url` |
-
-### F. Security precautions
-
-- Never put real passwords in Kubernetes YAML files committed to Git.
-- Never commit `.env` files containing credentials.
-- Avoid displaying Secret values using `kubectl get secret -o yaml`.
-- Do not recreate database Secrets when updating the FastAPI image.
-- Restrict permission to read Kubernetes Secrets using RBAC.
-- Kubernetes Secrets are not automatically equivalent to a dedicated encrypted secret-management system; review cluster encryption and access controls separately.
-
-**Important:** A newly generated password is suitable for initializing a new PostgreSQL database. Replacing the Secret alone does not change the password inside an existing PostgreSQL database. Credential rotation requires a coordinated procedure.
-
-## 3.4. Connect to GKE
-
-Open Google Cloud Shell.
-
-```bash
-gcloud config set project greenscale-group24-512813
-
-gcloud container clusters get-credentials greenscale-cluster1 \
-  --zone europe-north1-a \
-  --project greenscale-group24-512813
-```
-
-Verify connectivity:
-
-```bash
-kubectl config current-context
-kubectl get nodes
-kubectl get namespaces
-```
-
-These instructions connect to the existing cluster. They do not create a new one.
-
-
-## 3.5. Deploy PostgreSQL and FastAPI to GKE
-
-This procedure assumes that:
-
-- The GKE cluster already exists and `kubectl` is connected to it.
-- The `greenscale` namespace and `greenscale-api` ServiceAccount exist.
-- The PostgreSQL and FastAPI database Secrets have been created.
-- The API ServiceAccount has the required Vertex AI IAM permissions.
-- The project repository is available locally or in Cloud Shell.
-
-**Important:** These commands describe a fresh deployment. Do not recreate the existing PostgreSQL database or Secrets during routine application updates.
-
-### A. Navigate to the GreenScale project
-
-In Google Cloud Shell, from the existing repository clone:
-
-```bash
-cd ~/Group-24/7project/greenscale
-```
-
-If the repository has not yet been cloned, obtain it from the team's GitHub repository and navigate to the `7project/greenscale` directory.
-
-### B. Deploy PostgreSQL persistent storage
+For a fresh installation, apply PostgreSQL before the API:
 
 ```bash
 kubectl apply -f k8s/postgres-pvc.yaml
-```
-
-Verify:
-
-```bash
-kubectl get pvc -n greenscale
-```
-
-Expected: `greenscale-postgres-pvc` has status `Bound`.
-
-The PersistentVolumeClaim requests 10 GiB of storage using the `standard-rwo` StorageClass.
-
-### C. Deploy PostgreSQL
-
-```bash
 kubectl apply -f k8s/postgres-service.yaml
 kubectl apply -f k8s/postgres-deployment.yaml
+kubectl rollout status deployment/greenscale-postgres -n greenscale --timeout=180s
 ```
 
-Check:
+Deploy the API and automatic execution components:
 
 ```bash
-kubectl rollout status deployment/greenscale-postgres \
-  -n greenscale --timeout=180s
-
-kubectl get pods -n greenscale
-```
-
-The PostgreSQL Pod should become `1/1 Running`.
-
-The Service `greenscale-postgres` provides the internal hostname used by FastAPI for database connections.
-
-### D. Deploy FastAPI
-
-```bash
+kubectl apply -f k8s/executor-rbac.yaml
 kubectl apply -f k8s/api-service.yaml
 kubectl apply -f k8s/api-deployment.yaml
+kubectl apply -f k8s/planner-cronjob.yaml
+kubectl apply -f k8s/dispatcher-cronjob.yaml
+kubectl rollout status deployment/greenscale-api -n greenscale --timeout=180s
 ```
 
-Check the rollout:
+**Existing cluster:** Apply only resources you intend to update. The PostgreSQL Deployment has one replica with `Recreate` strategy and a persistent volume; this is **not** a multi-replica PostgreSQL high-availability setup.
 
-```bash
-kubectl rollout status deployment/greenscale-api \
-  -n greenscale --timeout=180s
-```
+### Database migrations
 
-Verify the resources:
-
-```bash
-kubectl get deployments,pods,services,pvc -n greenscale
-```
-
-Expected:
-
-- `greenscale-api`: `1/1` available
-- `greenscale-postgres`: `1/1` available
-- Both application Pods: `Running`
-- PostgreSQL PVC: `Bound`
-
-### E. Verify FastAPI health
-
-In the first Google Cloud Shell terminal, start port forwarding:
-
-```bash
-kubectl port-forward -n greenscale \
-  service/greenscale-api-service 8000:8000
-```
-
-Leave this terminal open.
-
-In a second Cloud Shell terminal, run:
-
-```bash
-curl --fail --show-error http://localhost:8000/health
-```
-
-Expected response:
-
-```json
-{"status":"ok"}
-```
-
-Stop port forwarding using `Ctrl+C` when finished.
-
-### F. Verify the database connection
-
-With port forwarding active, open `http://localhost:8000/login`, create an
-account, and sign in. The dashboard loads jobs associated with that account.
-Existing jobs created before account support remain unassigned and are not shown.
-If the dashboard cannot load jobs, inspect the API logs and database configuration.
-
-### G. Verify the deployed image
-
-```bash
-kubectl get deployment greenscale-api -n greenscale \
-  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
-```
-
-Expected image for the current deployment:
-
-```text
-europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:auth-register-v2
-```
-
-### H. Important deployment notes
-
-- The API and PostgreSQL Services use `ClusterIP` and are not directly exposed to the public internet.
-- The API uses Kubernetes readiness and liveness probes.
-- Vertex AI authentication uses Workload Identity.
-- PostgreSQL data is stored on a PersistentVolumeClaim.
-- Do not delete or replace the PVC during a routine API update.
-- The automatic Kubernetes Job executor requires separate integration verification.
-- A new PostgreSQL installation must have its database schema initialized through the project's supported startup or migration mechanism before job endpoints can work reliably.
-
-## 3.6. Database schema and authentication
-
-On startup, SQLAlchemy creates missing tables. It does not add columns to
-existing tables. Before deploying the authentication-enabled API to the existing
-PostgreSQL database, apply the idempotent migration from the project root in
-Cloud Shell:
+The application can create missing tables on startup but does not automatically add columns to existing tables. When updating an existing database to the account and stored-LLM-response features, the repository provides these migrations:
 
 ```bash
 kubectl exec -i -n greenscale deployment/greenscale-postgres -- \
   psql -U greenscale -d greenscale < migrations/002_add_user_auth.sql
-```
-
-The migration creates `users` and `user_sessions`, then adds nullable
-`jobs.user_id`. Existing job rows are preserved and remain unassigned; new jobs
-belong to the signed-in account. The migration can be rerun safely.
-
-For the stored Gemini response shown in job details, apply migration 003 after
-syncing the updated project files:
-
-```bash
 kubectl exec -i -n greenscale deployment/greenscale-postgres -- \
   psql -U greenscale -d greenscale < migrations/003_add_llm_response.sql
 ```
 
-This adds nullable `jobs.llm_response`; existing rows remain valid and show no
-Gemini response. The migration can be rerun safely.
+**Run migrations only when required**, after checking which schema changes have already been applied. Preserve database data and the PVC; do not delete either to update the schema.
 
-After deployment, check the API logs:
+## 6. Verify deployment and job execution
 
-```bash
-kubectl logs deployment/greenscale-api -n greenscale --tail=50
-```
-
-Open `http://localhost:8000/login` through the active port-forward to create an
-account and sign in. Job API requests require the session cookie, and users only
-see jobs assigned to their own account. Never delete the database or its PVC to
-apply this schema change.
-
-
-## 4. Kubernetes Infrastructure
-
-GreenScale currently uses the following manifests:
-
-| Manifest | Purpose |
-|---|---|
-| `k8s/api-deployment.yaml` | FastAPI Deployment, Vertex AI configuration, health probes |
-| `k8s/api-service.yaml` | Internal API Service on port 8000 |
-| `k8s/postgres-deployment.yaml` | PostgreSQL Deployment |
-| `k8s/postgres-service.yaml` | Internal PostgreSQL Service on port 5432 |
-| `k8s/postgres-pvc.yaml` | Persistent storage for PostgreSQL |
-| `k8s/executor-rbac.yaml` | Kubernetes executor access-control resources |
-
-The API uses the Kubernetes ServiceAccount `greenscale-api` for Google Cloud Workload Identity.
-
-The existing GKE namespace contains two application Deployments: `greenscale-api` and `greenscale-postgres`.
-
-## 5. Verify the Existing Deployment
+### 6.1 Check the main resources
 
 ```bash
-kubectl get deployments,pods,services,pvc -n greenscale
-```
-
-Expected healthy conditions:
-
-- Both Deployments show `1/1` ready.
-- FastAPI and PostgreSQL Pods show `Running`.
-- PostgreSQL PersistentVolumeClaim shows `Bound`.
-- The API Service exposes port 8000 inside the cluster.
-- The PostgreSQL Service exposes port 5432 inside the cluster.
-
-Check the API rollout:
-
-```bash
-kubectl rollout status deployment/greenscale-api -n greenscale
-```
-
-Inspect the Deployment:
-
-```bash
-kubectl describe deployment greenscale-api -n greenscale
-```
-
-## 6. Health Monitoring
-
-The FastAPI Deployment uses two Kubernetes health probes.
-
-**Readiness probe**
-
-- Endpoint: `/health`
-- Port: `8000`
-- Initial delay: 5 seconds
-- Check interval: 10 seconds
-
-**Liveness probe**
-
-- Endpoint: `/health`
-- Port: `8000`
-- Initial delay: 15 seconds
-- Check interval: 20 seconds
-
-The health endpoint checks application responsiveness. It does not independently guarantee database availability.
-
-## 7. Logs and Troubleshooting
-
-View API logs:
-
-```bash
-kubectl logs deployment/greenscale-api -n greenscale --tail=50
-```
-
-View PostgreSQL logs:
-
-```bash
-kubectl logs deployment/greenscale-postgres -n greenscale --tail=50
-```
-
-Inspect recent cluster events:
-
-```bash
-kubectl get events -n greenscale \
-  --sort-by=.metadata.creationTimestamp
-```
-
-Inspect Pods:
-
-```bash
-kubectl get pods -n greenscale -o wide
-```
-
-```bash
-kubectl describe pods -n greenscale
-```
-
-Logs must be reviewed before sharing to ensure they do not contain credentials or sensitive information.
-
-## 8. Vertex AI Integration
-
-The FastAPI Deployment configures Vertex AI using:
-
-- `USE_VERTEX_AI=true`
-- `GOOGLE_CLOUD_PROJECT=greenscale-group24-512813`
-- `GOOGLE_CLOUD_LOCATION=global`
-
-The application uses Workload Identity rather than a hardcoded Gemini API key when Vertex AI mode is enabled.
-
-A live Gemini request and GreenScale runtime prediction have both been verified from the running GKE container.
-
-## 9. Scope and Limitations
-
-The following have been verified:
-
-- FastAPI runs on GKE.
-- PostgreSQL runs with persistent storage.
-- API-to-database communication works.
-- Vertex AI provides runtime predictions.
-- Kubernetes health probes are active.
-- Kubernetes Services provide internal connectivity.
-- A manually created Kubernetes batch Job can execute successfully.
-
-The complete automatic scheduler-to-Kubernetes-Job execution workflow requires separate integration verification.
-
-Deployment, rollback, cleanup, and security-review procedures will be expanded during the remaining Member C Phase 4 work.
-
-## 10. Deployment Rollback and Recovery
-
-Kubernetes maintains revision history for the GreenScale FastAPI Deployment. This allows the team to restore a previous Deployment configuration if an update fails.
-
-### A. Check deployment history
-
-```bash
-kubectl rollout history deployment/greenscale-api -n greenscale
-```
-
-The deployment had three revisions during Phase 3 verification.
-
-### B. Inspect the current deployment
-
-```bash
-kubectl get deployment greenscale-api -n greenscale
-
-kubectl get pods -n greenscale
-```
-
-Check the currently configured Docker image:
-
-```bash
+kubectl get deployments,pods,services,pvc,cronjobs -n greenscale
+kubectl get jobs -n greenscale
 kubectl get deployment greenscale-api -n greenscale \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
-### C. Roll back if necessary
+Check that the API and PostgreSQL Pods are running, the PostgreSQL PVC is `Bound`, and both CronJobs exist. The API Deployment includes readiness and liveness probes on `/health` and CPU/memory requests and limits.
 
-If a new deployment fails, an authorized team member can run:
-
-```bash
-kubectl rollout undo deployment/greenscale-api -n greenscale
-```
-
-This restores the previous Deployment revision.
-
-To restore a specific available revision:
+### 6.2 Access the application
 
 ```bash
-kubectl rollout undo deployment/greenscale-api \
-  -n greenscale --to-revision=2
+kubectl port-forward -n greenscale service/greenscale-api-service 8000:8000
 ```
 
-**Warning:** These commands modify the running application. Execute them only when a rollback is necessary.
+Leave that terminal open. In another terminal, test `curl http://localhost:8000/health`. Open `http://localhost:8000/login` to sign in, or `http://localhost:8000/docs` to inspect the API. The Service is `ClusterIP`, so it is not a public LoadBalancer.
 
-### D. Verify recovery
+### 6.3 Check an actual submitted job
+
+Submit a supported workload through GreenScale, then replace `<ID>` below with its database job ID:
 
 ```bash
-kubectl rollout status deployment/greenscale-api \
-  -n greenscale --timeout=180s
-
-kubectl get pods -n greenscale
+kubectl get jobs -n greenscale
+JOB_ID=123  # Replace 123 with the actual GreenScale job ID
+kubectl get job "gs-$JOB_ID" -n greenscale
+kubectl logs "job/gs-$JOB_ID" -n greenscale
 ```
 
-Inspect logs if the application remains unhealthy:
+Expected successful path: `PENDING → WAITING → RUNNING → SUCCEEDED`. The planner chooses a time; the dispatcher creates and monitors the Kubernetes Job. Its actual Pod start may be later than `scheduled_for` due to polling and Kubernetes startup. For CSV jobs, required Google Cloud Storage access must also be configured.
+
+## 7. Troubleshooting
 
 ```bash
 kubectl logs deployment/greenscale-api -n greenscale --tail=50
+kubectl logs deployment/greenscale-postgres -n greenscale --tail=50
+kubectl get cronjobs,jobs,pods -n greenscale
+kubectl get events -n greenscale --sort-by=.metadata.creationTimestamp
+kubectl describe deployment greenscale-api -n greenscale
 ```
 
-### E. Important limitations
+| Symptom | Check first |
+|---|---|
+| API not ready | API logs, `/health`, database connection and Secrets |
+| Database unavailable | PostgreSQL Pod, Service, Secret, PVC |
+| Job never starts | Planner/dispatcher CronJobs, scheduled time, executor RBAC |
+| `ImagePullBackOff` / missing worker module | Registry access and image referenced by API, planner, dispatcher, and worker |
+| Job fails | `kubectl logs job/gs-<ID>` and Job/Pod details |
+| Vertex AI request fails | API ServiceAccount, Workload Identity, IAM access |
 
-- Kubernetes rollback restores Deployment configuration, not database contents.
-- It does not reverse PostgreSQL schema changes.
-- A previous image must still be available in the container registry.
-- The restored configuration must remain compatible with the current database and external services.
-- Deployment revision history is limited by Kubernetes retention settings.
-- After a rollback, update the repository to reflect the intended deployed configuration and document the reason.
+Do not share logs without checking for sensitive information. A passing `/health` means the API responds; it does not guarantee the database or the full scheduler workflow is healthy.
 
-The rollback commands have been documented but have not been executed against the working GreenScale deployment during this phase.
+## 8. Recovery and cleanup
 
-## 11. Kubernetes Cleanup
-
-This section documents how to remove GreenScale resources after the project is finished.
-
-**Warning:** Cleanup commands are destructive. Do not run them on the working GKE environment during normal development or demonstrations.
-
-### A. Inspect resources before cleanup
+To inspect Deployment history or revert a failed API update:
 
 ```bash
-kubectl config current-context
-kubectl get deployments,pods,services,pvc -n greenscale
+kubectl rollout history deployment/greenscale-api -n greenscale
+# Only if a rollback is needed:
+kubectl rollout undo deployment/greenscale-api -n greenscale
+kubectl rollout status deployment/greenscale-api -n greenscale
 ```
 
-Confirm that the correct cluster and namespace are selected.
+Rollback restores a previous **Deployment configuration**, not a database backup or schema. The rollback procedure is documented; it should not be described as tested unless actually performed.
 
-### B. Remove the FastAPI application
+After the project finishes, first inspect `kubectl get all,pvc -n greenscale`. Deleting the PostgreSQL PVC can permanently remove the disk and its data; **never delete it during routine troubleshooting or deployment**. Removing workloads does not necessarily stop all GCP charges. Cleanup of the working cluster must be agreed with the team.
 
-```bash
-kubectl delete deployment greenscale-api -n greenscale
-kubectl delete service greenscale-api-service -n greenscale
-```
+## 9. Verified scope and limitations
 
-These commands remove the FastAPI Deployment and its Service.
-
-They do not directly delete PostgreSQL or its persistent volume.
-
-### C. Remove PostgreSQL compute resources
-
-Only after confirming that the database is no longer required:
-
-```bash
-kubectl delete deployment greenscale-postgres -n greenscale
-kubectl delete service greenscale-postgres -n greenscale
-```
-
-These commands stop PostgreSQL and remove its Service. The PersistentVolumeClaim remains unless deleted separately.
-
-### D. Persistent storage cleanup
-
-The PostgreSQL data is stored using:
-
-`greenscale-postgres-pvc`
-
-Deleting the PVC may also delete the underlying persistent disk, depending on the StorageClass reclaim policy.
-
-**Do not delete the PVC unless data loss is acceptable and the team has confirmed that any required backup exists.**
-
-For complete teardown only:
-
-```bash
-kubectl delete pvc greenscale-postgres-pvc -n greenscale
-```
-
-### E. Other resources
-
-Review remaining Kubernetes resources:
-
-```bash
-kubectl get all -n greenscale
-kubectl get pvc,secrets,serviceaccounts,roles,rolebindings -n greenscale
-```
-
-A complete teardown must also account for Kubernetes Jobs, executor RBAC, Secrets, ServiceAccounts, cluster-level resources where applicable, and Google Cloud IAM bindings created for GreenScale.
-
-Do not remove shared cluster resources or IAM bindings without confirming ownership.
-
-### F. Verify cleanup
-
-```bash
-kubectl get deployments,pods,services,pvc -n greenscale
-```
-
-Confirm that only the intended resources have been removed.
-
-### G. Google Cloud cost considerations
-
-Kubernetes resource cleanup and GKE cluster deletion are separate operations.
-
-Deleting application Pods does not necessarily stop GKE cluster charges. Persistent disks, cluster infrastructure, networking resources, and other Google Cloud resources may continue generating costs.
-
-After the project, review the GCP Billing console and remove resources that are no longer needed, following the team's agreed cleanup plan.
-
-### H. Cleanup status
-
-These commands are documented for reproducibility.
-
-They have **not been executed against the working GreenScale environment**, because the project is still under development.
-
----
-
-## Phase 3 — Automated Kubernetes Job Execution
-
-### Deployment order
-
-1. Configure executor permissions:
-   `kubectl apply -f k8s/executor-rbac.yaml`
-
-2. Deploy the planner:
-   `kubectl apply -f k8s/planner-cronjob.yaml`
-
-3. Deploy the dispatcher:
-   `kubectl apply -f k8s/dispatcher-cronjob.yaml`
-
-### Verify deployment
-
-Run:
-`kubectl get deployments,cronjobs,pvc -n greenscale`
-
-The planner runs every 5 minutes.
-The dispatcher runs every minute.
-
-### Tested container images
-
-- API: llm-fix-v1
-- Planner: planner-fix-v1
-- Dispatcher: dispatcher-v3
-- Worker: dispatcher-v3
-
-### End-to-end workflow
-
-PENDING → WAITING → RUNNING → SUCCEEDED
-
-The planner schedules jobs, the dispatcher submits them
-to Kubernetes, and the dispatcher synchronizes completed
-job statuses with PostgreSQL.
-
-Do not recreate database Secrets or delete the PostgreSQL
-PVC during routine deployments.
+- The team's GKE environment has demonstrated API, PostgreSQL persistent storage, Vertex AI integration, and automatic Kubernetes batch-job execution.
+- The repository includes planner/dispatcher CronJobs, worker code, authentication, CSV APIs, tests, and deployment instructions.
+- New-project setup still requires manual GCP identity, permissions, image, and Secret configuration.
+- An **independent fresh deployment** and **rollback/cleanup against the working cluster** are not claimed as completed tests.
+- For fresh-clone instructions and tests, see `docs/Reproducubility.md`.
