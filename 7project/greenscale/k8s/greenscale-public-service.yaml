@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    cloud.google.com/neg: '{"ingress":true}'
+    networking.gke.io/target-pool: a7524402a1d41418b9edd27130d6c106
+  creationTimestamp: "2026-11-06T11:42:11Z"
+  finalizers:
+  - gke.networking.io/l4-netlb-v1
+  - service.kubernetes.io/load-balancer-cleanup
+  name: greenscale-public
+  namespace: greenscale
+  resourceVersion: "1794144123013503012"
+  uid: 7524402a-1d41-418b-9edd-27130d6c106b
+spec:
+  allocateLoadBalancerNodePorts: true
+  clusterIP: 34.118.228.175
+  clusterIPs:
+  - 34.118.228.175
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  loadBalancerIP: 35.228.104.2
+  ports:
+  - name: http
+    nodePort: 32347
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  - name: https
+    nodePort: 30876
+    port: 443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app: greenscale-caddy
+  sessionAffinity: None
+  type: LoadBalancer
+status:
+  loadBalancer:
+    ingress:
+    - ip: 35.228.104.2
+      ipMode: VIP
