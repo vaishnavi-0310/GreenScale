@@ -168,7 +168,8 @@ read-only access to the source bucket. The API identity needs permission to
 upload objects. The cluster must have Workload Identity Federation enabled.
 
 When a CSV summary job succeeds, its detail page offers **View results**. The
-API reads the summary from the worker Pod logs; results are not stored in the
+API reads the summary from the worker Pod logsversion
+; results are not stored in the
 database and stop being available when Kubernetes deletes the Pod (the Job TTL
 is one hour). `k8s/executor-rbac.yaml` grants the API service account permission
 to list worker Pods and read their logs.

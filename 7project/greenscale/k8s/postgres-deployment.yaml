@@ -28,6 +28,25 @@ spec:
           ports:
             - containerPort: 5432
 
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+
           envFrom:
             - secretRef:
                 name: greenscale-postgres-secret
