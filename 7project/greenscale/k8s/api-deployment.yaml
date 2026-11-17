@@ -6,7 +6,7 @@ metadata:
   namespace: greenscale
 
 spec:
-  replicas: 1
+  replicas: 3
 
   selector:
     matchLabels:
@@ -22,7 +22,7 @@ spec:
 
       containers:
         - name: greenscale-api
-          image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:csv-ui-v1
+          image: europe-north1-docker.pkg.dev/greenscale-group24-512813/greenscale/greenscale-api:csv-result-parse-v2
           imagePullPolicy: Always
 
           ports:
@@ -38,7 +38,7 @@ spec:
 
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
