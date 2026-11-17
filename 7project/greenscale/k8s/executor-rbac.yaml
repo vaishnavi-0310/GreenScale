@@ -1,3 +1,4 @@
+# ServiceAccount is an identity for a pod. Role is a list of permitted actions. RoleBinding attaches a Role to one or more ServiceAccounts.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

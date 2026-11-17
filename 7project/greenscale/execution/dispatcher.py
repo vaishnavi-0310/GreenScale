@@ -3,39 +3,41 @@
 from __future__ import annotations
 
 import os
-import re
+import re #reads bucket and object name from the GCS URI
 import argparse
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass # this module provides a decorator and functions for automatically adding special methods to user-defined classes.
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any # this module provides support for type hints, allowing you to specify the expected types of variables, function parameters, and return values.
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select 
+from sqlalchemy.orm import Session 
 
 from app.models import Job, JobStatus
+# this module provides functions for submitting jobs to a Kubernetes cluster
 from execution.job_executor import (
     LEGACY_IMAGE,
     WORKER_IMAGE,
     get_job_status,
     submit_once,
 )
+# retrieving the start and finish times of jobs
 from execution.job_times import get_job_times
 
 DEFAULT_NAMESPACE = "greenscale"
 DEFAULT_IMAGE = WORKER_IMAGE
-_GCS_URI_RE = re.compile(r"gs://[^\s\"'<>]+")
+_GCS_URI_RE = re.compile(r"gs://[^\s\"'<>]+")  #csv
 
-
-@dataclass(frozen=True)
+# this class represents the result of dispatching a job
+@dataclass(frozen=True) # makes instances immutable,
 class DispatchResult:
     job_id: int
     outcome: str
     error_type: str | None = None
     error_detail: str | None = None
 
-
+# turns a Kubernetes API error into a short readable string
 def describe_error(exc: Exception) -> str | None:
     """Short description of a Kubernetes API error: HTTP status, reason and message."""
     status = getattr(exc, "status", None)
@@ -47,7 +49,7 @@ def describe_error(exc: Exception) -> str | None:
         detail += f": {body[:400]}"
     return detail
 
-
+# extracts a GCS URI from a job description
 def _gcs_uri_from_description(description: str | None) -> str | None:
     if not description:
         return None
@@ -56,8 +58,9 @@ def _gcs_uri_from_description(description: str | None) -> str | None:
         return None
     return match.group(0).rstrip(".,;:!?)]}")
 
-
+# generates the command to run the worker for a given job
 def _worker_command(job: Job) -> list[str]:
+    # generates the appropriate command to run the worker for sleep workload.
     if job.workload_type == "sleep":
         seconds = min(max(int(job.estimated_minutes or 1), 1), 1440) * 60
         # Use an explicit sleep duration for execution, not the rounded estimate.
@@ -71,9 +74,11 @@ def _worker_command(job: Job) -> list[str]:
             if 1 <= requested_seconds <= 86400:
                 seconds = requested_seconds
         return ["python", "-m", "execution.worker", "sleep", "--seconds", str(seconds)]
+    # generates the command to run the worker for the factorial workload. 
     if job.workload_type == "factorial":
         input_size_mb = min(max(int(job.input_size_mb or 1), 1), 500)
         return ["python", "-m", "execution.worker", "factorial", "--input-size-mb", str(input_size_mb)]
+    # generates the command to run the worker for the CSV summary workload.
     if job.workload_type == "csv_summary":
         uri = _gcs_uri_from_description(job.description)
         if not uri:
@@ -88,7 +93,7 @@ def _worker_command(job: Job) -> list[str]:
         ]
     raise ValueError(f"Unsupported workload_type: {job.workload_type!r}")
 
-
+# converts a job object into a request dictionary for the executor
 def job_to_executor_request(
     job: Job,
     *,
@@ -96,6 +101,7 @@ def job_to_executor_request(
     namespace: str = DEFAULT_NAMESPACE,
 ) -> dict[str, Any]:
     """Translate stored workload metadata into an allowlisted worker command."""
+    # Check the schedule
     if job.scheduled_for is None:
         raise ValueError(f"Job {job.id} has no scheduled_for timestamp")
     scheduled = job.scheduled_for
@@ -103,6 +109,7 @@ def job_to_executor_request(
         scheduled = scheduled.replace(tzinfo=timezone.utc)
     scheduled = scheduled.astimezone(timezone.utc)
 
+    # Pick the image and command
     if job.workload_type is None:
         if job.description:
             raise ValueError("job description did not resolve to a supported workload type")
@@ -112,6 +119,7 @@ def job_to_executor_request(
     else:
         selected_image = image or DEFAULT_IMAGE
         command = _worker_command(job)
+    # Build the request dictionary
     return {
         "job_id": str(job.id),
         "image": selected_image,
@@ -120,10 +128,11 @@ def job_to_executor_request(
         "namespace": namespace,
     }
 
-
+# reconciles the status of running jobs
 def _reconcile_running_jobs(
     db: Session, batch_api: Any, *, now: datetime, namespace: str, limit: int
 ) -> list[DispatchResult]:
+    # Pick the jobs to check
     statement = (
         select(Job)
         .where(Job.status == JobStatus.RUNNING, Job.k8s_job_name.is_not(None))
@@ -131,11 +140,13 @@ def _reconcile_running_jobs(
         .limit(limit)
         .with_for_update(skip_locked=True)
     )
+    # Copy the identifiers and commit
     jobs = list(db.scalars(statement).all())
     references = [(job.id, job.k8s_job_name) for job in jobs]
     db.commit()
 
     results: list[DispatchResult] = []
+    # Ask Kubernetes for each job’s status
     for job_id, job_name in references:
         try:
             executor_status = get_job_status(batch_api, job_name, namespace)
@@ -144,12 +155,14 @@ def _reconcile_running_jobs(
             results.append(DispatchResult(job_id, "status_check_error", type(exc).__name__))
             continue
 
+        # Reload the record
         job = db.get(Job, job_id)
         if job is None:
             results.append(DispatchResult(job_id, "record_missing"))
             continue
-        # Prefer Kubernetes' timestamps over the time of this periodic check.
+        
         k8s_started = k8s_finished = None
+        # Get Kubernetes’ own timestamps
         if executor_status in ("succeeded", "failed", "running"):
             try:
                 k8s_started, k8s_finished = get_job_times(batch_api, job_name, namespace)
@@ -166,6 +179,7 @@ def _reconcile_running_jobs(
             job.finished_at = job.finished_at or k8s_finished or now
         elif executor_status == "running" and job.started_at is None:
             job.started_at = now
+        # Commit and record the outcome
         db.commit()
         results.append(DispatchResult(job_id, f"status_{executor_status}"))
     return results
@@ -185,6 +199,7 @@ def dispatch_due_jobs(
     sleep: Any = time.sleep,
 ) -> list[DispatchResult]:
     """Reconcile running jobs and submit each due waiting job once."""
+    # validate inputs
     if limit < 1:
         raise ValueError("limit must be positive")
     now = now or datetime.now(timezone.utc)
@@ -192,6 +207,7 @@ def dispatch_due_jobs(
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(timezone.utc)
 
+    # claim due jobs
     conditions = [
         Job.status == JobStatus.WAITING,
         Job.scheduled_for.is_not(None),
@@ -210,6 +226,7 @@ def dispatch_due_jobs(
     claimed = list(db.scalars(statement).all())
     requests: list[tuple[int, str, dict[str, Any]]] = []
     results: list[DispatchResult] = []
+    # submit each claimed job
     for job in claimed:
         job_name = f"gs-{job.id}"
         try:
@@ -227,6 +244,7 @@ def dispatch_due_jobs(
         requests.append((job.id, job_name, request))
     db.commit()
 
+    # submit to Kubernetes and optionally wait for completion
     max_polls = (
         int(wait_seconds // poll_interval)
         if wait_seconds > 0 and poll_interval > 0
@@ -269,6 +287,7 @@ def dispatch_due_jobs(
                     job.started_at = now
             db.commit()
             results.append(DispatchResult(claimed_id, outcome))
+        # Handle any exceptions during submission or status checking
         except Exception as exc:
             db.rollback()
             job = db.get(Job, claimed_id)
@@ -279,6 +298,7 @@ def dispatch_due_jobs(
                 DispatchResult(claimed_id, "error", type(exc).__name__, describe_error(exc))
             )
 
+    # reconcile any other running jobs
     results.extend(
         _reconcile_running_jobs(
             db,
@@ -290,7 +310,7 @@ def dispatch_due_jobs(
     )
     return results
 
-
+# create a Kubernetes BatchV1Api client, loading credentials from the environment
 def create_batch_api(*, in_cluster: bool | None = None) -> Any:
     """Load Kubernetes credentials and return a BatchV1Api client."""
     from kubernetes import client, config

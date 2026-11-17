@@ -31,6 +31,7 @@ def _aware(value):
         and value.utcoffset() is not None
     )
 
+# Calculate the price score for a given time interval
 def _price_score(start, end, slots):
     cursor = start
     score = 0.0
@@ -39,7 +40,7 @@ def _price_score(start, end, slots):
         if slot.end <= cursor:
             continue
 
-        # missing interval between two prices
+        # missing interval/gap between two prices
         if slot.start > cursor:
             return None
 
@@ -120,6 +121,7 @@ def choose_start(job_id, job_type, priority, deadline,
     slots = sorted(prices or [], key=lambda slot: slot.start)
 
     for i, slot in enumerate(slots):
+        # validate each price slot
         if (
             not _aware(slot.start)
             or not _aware(slot.end)

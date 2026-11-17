@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-GreenScale is a electricity price-aware, cloud-native system for scheduling flexible batch jobs in Kubernetes. Users describe a task in simple natural language, and an LLM converts the request into structured job details such as the task name, priority, deadline, and estimated execution time. GreenScale then validates and stores the job information, decides whether the job should run immediately or wait for a suitable execution window based on priority, and creates the job in Kubernetes at the selected time. It also tracks the job until completion and stores its execution status and timing information and displays on GreenScale website.
+GreenScale is an electricity price-aware, cloud-native system for scheduling flexible batch jobs in Kubernetes. Users describe a task in simple natural language, and an LLM converts the request into structured job details such as the task name, priority, deadline, and estimated execution time. GreenScale then validates and stores the job information, decides whether the job should run immediately or wait for a suitable execution window based on priority, and creates the job in Kubernetes at the selected time. It also tracks the job until completion and stores its execution status and timing information and displays on GreenScale website.
 
 ### Problem
 

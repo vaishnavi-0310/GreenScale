@@ -9,7 +9,7 @@ from app.models import Job, JobStatus
 from app.predictor import predict_runtime
 from app.scheduler import choose_start
 
-
+# retrieves all jobs with status PENDING from the database.
 def get_pending_jobs(db: Session) -> list[Job]:
     """Retrieve all pending jobs from PostgreSQL."""
 
@@ -18,7 +18,7 @@ def get_pending_jobs(db: Session) -> list[Job]:
         .where(Job.status == JobStatus.PENDING)
         .order_by(Job.id)
     )
-
+    
     return list(db.scalars(statement).all())
 
 
@@ -96,7 +96,7 @@ def plan_pending_job(
     # 6. Calculate the best starting time
     decision = choose_start(
         job_id=job.id,
-        job_type="etl",
+        job_type=workload_type or "legacy",
         priority=job.priority.value,
         deadline=job.deadline,
         predicted_seconds=runtime_seconds,
@@ -190,7 +190,7 @@ def main():
 
         # 4. Plan each pending job
         planned_count = 0
-        deferred_count = 0
+        deferred_count = 0 
         failed_count = 0
 
         # Keep IDs so we can load fresh ORM objects
