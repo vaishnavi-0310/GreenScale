@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: 7project/greenscale
+        working-directory: GreenScale
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: 7project/greenscale/requirements.txt
+          cache-dependency-path: GreenScale/requirements.txt
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -42,4 +42,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t greenscale:ci 7project/greenscale
+        run: docker build -t greenscale:ci GreenScale
