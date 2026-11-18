@@ -6,11 +6,7 @@ metadata:
   namespace: greenscale
 
 spec:
-<<<<<<< Updated upstream
-  replicas: 3
-=======
   replicas: 2
->>>>>>> Stashed changes
 
   selector:
     matchLabels:
